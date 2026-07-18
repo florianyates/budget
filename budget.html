@@ -639,10 +639,30 @@
         <button class="btn btn-secondary btn-sm" onclick="exportTransactions()">Export CSV</button>
       </div>
 
+      <!-- Bulk action bar -->
+      <div id="bulk-bar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border:1px solid var(--accent);border-radius:10px;">
+        <span id="bulk-count-label" style="font-size:13px;font-weight:600;color:var(--accent);min-width:80px;"></span>
+        <select id="bulk-cat-sel" class="filter-bar" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Category —</option>
+        </select>
+        <select id="bulk-type-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Type —</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+        <select id="bulk-bp-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Tax Tag —</option>
+          <option value="personal">Personal</option>
+          <option value="business">Business</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="bulkApply()">Apply to Selected</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearBulkSelection()">Clear</button>
+      </div>
+
       <div class="card">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Description / Company</th><th>Category</th><th>Type</th><th>Tax</th><th>Amount</th><th></th></tr></thead>
+            <thead><tr><th style="width:32px;"><input type="checkbox" id="select-all-txns" title="Select all" onchange="toggleSelectAll(this.checked)" style="cursor:pointer;accent-color:var(--accent);"></th><th>Date</th><th>Description / Company</th><th>Category</th><th>Type</th><th>Tax</th><th>Amount</th><th></th></tr></thead>
             <tbody id="transactions-table"></tbody>
           </table>
         </div>
@@ -1119,6 +1139,54 @@ function saveTxnField(id, field, rawValue) {
   save('txns_' + CURRENT_FY, transactions);
 }
 
+function getSelectedTxnIds() {
+  return [...document.querySelectorAll('.txn-select:checked')].map(cb => Number(cb.dataset.id));
+}
+
+function updateBulkBar() {
+  const ids = getSelectedTxnIds();
+  const bar = document.getElementById('bulk-bar');
+  if (!bar) return;
+  bar.style.display = ids.length > 0 ? 'flex' : 'none';
+  const lbl = document.getElementById('bulk-count-label');
+  if (lbl) lbl.textContent = `${ids.length} selected`;
+  const all = document.querySelectorAll('.txn-select');
+  const selAll = document.getElementById('select-all-txns');
+  if (selAll) {
+    selAll.indeterminate = ids.length > 0 && ids.length < all.length;
+    selAll.checked = all.length > 0 && ids.length === all.length;
+  }
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.txn-select').forEach(cb => { cb.checked = checked; });
+  updateBulkBar();
+}
+
+function bulkApply() {
+  const ids = getSelectedTxnIds();
+  if (ids.length === 0) return;
+  const cat  = document.getElementById('bulk-cat-sel').value;
+  const type = document.getElementById('bulk-type-sel').value;
+  const bp   = document.getElementById('bulk-bp-sel').value;
+  if (!cat && !type && !bp) { showToast('Choose at least one field to apply.', 'error'); return; }
+  ids.forEach(id => {
+    const t = transactions.find(t => t.id == id);
+    if (!t) return;
+    if (cat)  { t.category = cat; if (CAPITAL_CATS.has(cat)) t.type = 'expense'; }
+    if (type) t.type = type;
+    if (bp)   t.bp = bp;
+  });
+  save('txns_' + CURRENT_FY, transactions);
+  renderTransactions();
+  showToast(`Updated ${ids.length} transaction${ids.length > 1 ? 's' : ''}.`, 'success');
+}
+
+function clearBulkSelection() {
+  document.querySelectorAll('.txn-select').forEach(cb => { cb.checked = false; });
+  updateBulkBar();
+}
+
 // ─── RENDER TRANSACTIONS ─────────────────────────────────────────────────────
 
 function renderTransactions() {
@@ -1133,6 +1201,12 @@ function renderTransactions() {
   if (catSel && catSel.options.length <= 1) {
     [...CATEGORIES.income, ...CATEGORIES.expense].forEach(c => {
       const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o);
+    });
+  }
+  const bulkCatSel = document.getElementById('bulk-cat-sel');
+  if (bulkCatSel && bulkCatSel.options.length <= 1) {
+    [...CATEGORIES.income, ...CATEGORIES.expense].forEach(c => {
+      const o = document.createElement('option'); o.value = c; o.textContent = c; bulkCatSel.appendChild(o);
     });
   }
   const monthSel = document.getElementById('filter-month');
@@ -1166,6 +1240,9 @@ function renderTransactions() {
     tr.dataset.txnId = t.id;
     const amtColor = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
     tr.innerHTML = `
+      <td style="width:32px;padding:8px;">
+        <input type="checkbox" class="txn-select" data-id="${t.id}" onchange="updateBulkBar()" style="cursor:pointer;accent-color:var(--accent);">
+      </td>
       <td style="min-width:120px;">
         <input type="date" class="txn-inline" value="${t.date}"
           onchange="saveTxnField(${t.id},'date',this.value)">
