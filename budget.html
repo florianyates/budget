@@ -119,6 +119,12 @@
   .badge-business { background: rgba(108,99,255,0.2); color: var(--accent); }
   .badge-personal { background: rgba(139,146,184,0.15); color: var(--text2); }
   .cat-pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); }
+  .txn-inline { background: transparent; border: 1px solid transparent; color: var(--text); padding: 3px 6px; border-radius: 4px; font-size: 12px; width: 100%; box-sizing: border-box; font-family: inherit; min-width: 0; }
+  .txn-inline:hover { border-color: var(--border); }
+  .txn-inline:focus { border-color: var(--accent); background: var(--surface2); outline: none; }
+  select.txn-inline { cursor: pointer; }
+  .txn-inline-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .txn-amount-input { text-align: right; font-weight: 600; font-size: 13px; width: 90px; }
 
   /* Progress bars */
   .progress-bar-wrap { margin-bottom: 16px; }
@@ -636,7 +642,7 @@
       <div class="card">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Company</th><th>Category</th><th>Type</th><th>Tax</th><th>Amount</th><th></th></tr></thead>
+            <thead><tr><th>Date</th><th>Description / Company</th><th>Category</th><th>Type</th><th>Tax</th><th>Amount</th><th></th></tr></thead>
             <tbody id="transactions-table"></tbody>
           </table>
         </div>
@@ -1084,6 +1090,35 @@ function closeEditModal() {
   editingId = null;
 }
 
+function saveTxnField(id, field, rawValue) {
+  const t = transactions.find(t => t.id == id);
+  if (!t) return;
+  if (field === 'amount') {
+    const n = parseFloat(rawValue);
+    if (isNaN(n) || n < 0) return;
+    t.amount = n;
+    // Update the amount cell colour without re-rendering
+    const row = document.querySelector(`tr[data-txn-id="${id}"]`);
+    if (row) {
+      const inp = row.querySelector('.txn-amount-input');
+      if (inp) inp.style.color = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
+    }
+  } else if (field === 'type') {
+    t.type = rawValue;
+    if (CAPITAL_CATS.has(t.category)) t.type = 'expense';
+    // Sync amount colour
+    const row = document.querySelector(`tr[data-txn-id="${id}"]`);
+    if (row) {
+      const inp = row.querySelector('.txn-amount-input');
+      if (inp) inp.style.color = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
+    }
+  } else {
+    t[field] = rawValue;
+    if (field === 'category' && CAPITAL_CATS.has(rawValue)) t.type = 'expense';
+  }
+  save('txns_' + CURRENT_FY, transactions);
+}
+
 // ─── RENDER TRANSACTIONS ─────────────────────────────────────────────────────
 
 function renderTransactions() {
@@ -1123,19 +1158,47 @@ function renderTransactions() {
   tbody.innerHTML = '';
   document.getElementById('txn-empty').style.display = filtered.length === 0 ? 'block' : 'none';
 
+  const allCatOpts = (sel) => [...CATEGORIES.income, ...CATEGORIES.expense]
+    .map(c => `<option value="${escAttr(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
+
   filtered.forEach(t => {
     const tr = document.createElement('tr');
+    tr.dataset.txnId = t.id;
+    const amtColor = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
     tr.innerHTML = `
-      <td>${fmtDate(t.date)}</td>
-      <td><div style="font-weight:600;font-size:13px;">${esc(t.description||'—')}</div>${t.notes?`<div style="font-size:11px;color:var(--text2);">${esc(t.notes)}</div>`:''}
+      <td style="min-width:120px;">
+        <input type="date" class="txn-inline" value="${t.date}"
+          onchange="saveTxnField(${t.id},'date',this.value)">
       </td>
-      <td style="color:var(--text2);font-size:13px;">${esc(t.company||'—')}</td>
-      <td><span class="cat-pill">${esc(t.category)}</span></td>
-      <td><span style="font-size:12px;color:${t.type==='income'?'var(--income-color)':'var(--expense-color)'};">${t.type}</span></td>
-      <td><span class="badge badge-${t.bp||'personal'}">${t.bp||'personal'}</span></td>
-      <td class="amount-${t.type}">${t.type==='expense'?'-':''}${fmt(t.amount)}</td>
-      <td style="display:flex;gap:6px;padding:10px 12px;">
-        <button class="btn btn-secondary btn-sm btn-icon" onclick="openEditModal(${t.id})" title="Edit">✏️</button>
+      <td style="min-width:180px;">
+        <input type="text" class="txn-inline" value="${escAttr(t.description||'')}" placeholder="Description"
+          onchange="saveTxnField(${t.id},'description',this.value)">
+        <input type="text" class="txn-inline txn-inline-sub" value="${escAttr(t.company||'')}" placeholder="Company"
+          onchange="saveTxnField(${t.id},'company',this.value)">
+      </td>
+      <td style="min-width:155px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'category',this.value)">
+          ${allCatOpts(t.category)}
+        </select>
+      </td>
+      <td style="min-width:95px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'type',this.value)">
+          <option value="income"${t.type==='income'?' selected':''}>Income</option>
+          <option value="expense"${t.type==='expense'?' selected':''}>Expense</option>
+        </select>
+      </td>
+      <td style="min-width:100px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'bp',this.value)">
+          <option value="personal"${(t.bp||'personal')==='personal'?' selected':''}>Personal</option>
+          <option value="business"${t.bp==='business'?' selected':''}>Business</option>
+        </select>
+      </td>
+      <td style="min-width:95px;">
+        <input type="number" class="txn-inline txn-amount-input" value="${t.amount}" min="0" step="0.01"
+          style="color:${amtColor};"
+          onchange="saveTxnField(${t.id},'amount',this.value)">
+      </td>
+      <td style="padding:8px;">
         <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTransaction(${t.id})" title="Delete">🗑</button>
       </td>`;
     tbody.appendChild(tr);
@@ -1999,6 +2062,7 @@ function csvSplit(line) {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
 
 // ─── BACKUP / RESTORE ────────────────────────────────────────────────────────
 
