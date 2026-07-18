@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Florian's Budget — FY 25/26</title>
+<title>Florian's Budget — FY 26/27</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
@@ -250,7 +250,7 @@
     </div>
     <div class="sidebar-footer">
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <span class="fy-badge">FY 25/26</span>
+        <span class="fy-badge">FY 26/27</span>
         <button onclick="toggleThemePanel()" title="Change theme" style="background:none;border:1px solid var(--border);border-radius:7px;padding:5px 8px;cursor:pointer;color:var(--text2);display:flex;align-items:center;gap:4px;font-size:11px;transition:all 0.15s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text2)'">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 0 20A10 10 0 0 1 12 2"/><path d="M12 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 22a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM4.22 4.22a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19.78 19.78a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM2 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM22 12a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM4.22 19.78a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19.78 4.22a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>
           Theme
@@ -261,9 +261,9 @@
         <button class="btn btn-secondary btn-sm" style="flex:1;justify-content:center;" onclick="document.getElementById('restore-input').click()" title="Restore from a backup file">Restore</button>
         <input type="file" id="restore-input" style="display:none" accept=".json" onchange="restoreData(event)">
       </div>
-      <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-top:8px;font-size:11px;" onclick="rolloverFY()" title="Archive FY 25/26 and start FY 26/27">
+      <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-top:8px;font-size:11px;" onclick="rolloverFY()" title="Archive FY 26/27 and start FY 27/28">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        Roll over to FY 26/27
+        Roll over to FY 27/28
       </button>
       <div id="storage-warning" style="display:none;font-size:10px;color:var(--warning);margin-top:8px;line-height:1.4;">⚠ Browser storage is blocked. Use <b>Backup</b> before closing to keep your data.</div>
     </div>
@@ -276,7 +276,7 @@
     <div id="page-dashboard" class="page active">
       <div class="page-header">
         <h1>Dashboard</h1>
-        <p id="dashboard-subtitle">FY 25/26 · Financial Year Overview</p>
+        <p id="dashboard-subtitle">FY 26/27 · Financial Year Overview</p>
       </div>
 
       <!-- KPI row -->
@@ -306,7 +306,7 @@
       <!-- Savings goal -->
       <div class="card" style="margin-bottom:24px;" id="savings-goal-card">
         <div class="section-header" style="margin-bottom:12px;">
-          <div class="card-title" style="margin-bottom:0;">Savings Goal — FY 25/26</div>
+          <div class="card-title" style="margin-bottom:0;">Savings Goal — FY 26/27</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-size:12px;color:var(--text2);">Target:</span>
             <div style="display:flex;align-items:center;gap:4px;">
@@ -391,7 +391,7 @@
     <div id="page-tax" class="page">
       <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
         <div>
-          <h1>Tax Summary — FY 25/26</h1>
+          <h1>Tax Summary — FY 26/27</h1>
           <p>Business-deductible expenses and income breakdown for your accountant</p>
         </div>
         <button class="btn btn-secondary" onclick="window.print()" style="flex-shrink:0;">
@@ -459,8 +459,8 @@
     <!-- PREDICTIONS -->
     <div id="page-predictions" class="page">
       <div class="page-header">
-        <h1>Predictions — FY 26/27</h1>
-        <div style="font-size:13px;color:var(--text2);">Projected from FY 25/26 pace with your adjustments</div>
+        <h1>Predictions — FY 27/28</h1>
+        <div style="font-size:13px;color:var(--text2);">Projected from FY 26/27 pace with your adjustments</div>
       </div>
 
       <div class="card" style="margin-bottom:24px;">
@@ -480,7 +480,7 @@
           </div>
           <div class="form-group" style="flex:0 0 auto;">
             <label>Rent Increase From</label>
-            <input type="month" id="pred-rent-from" value="2026-12" min="2026-07" max="2027-06">
+            <input type="month" id="pred-rent-from" value="2027-12" min="2027-07" max="2028-06">
           </div>
           <button class="btn btn-primary btn-sm" onclick="renderNextYearPredictions()" style="margin-bottom:2px;">Update</button>
         </div>
@@ -513,7 +513,7 @@
       <!-- Chart + adjustments breakdown -->
       <div class="grid-2">
         <div class="card">
-          <div class="card-title" style="margin-bottom:12px;">Monthly Forecast — FY 26/27</div>
+          <div class="card-title" style="margin-bottom:12px;">Monthly Forecast — FY 27/28</div>
           <div class="chart-wrap"><canvas id="chart-prediction"></canvas></div>
         </div>
         <div class="card">
@@ -527,7 +527,7 @@
     <div id="page-transactions" class="page">
       <div class="page-header">
         <h1>Transactions</h1>
-        <p>All income and expense records for FY 25/26</p>
+        <p>All income and expense records for FY 26/27</p>
       </div>
 
       <!-- Add transaction form -->
@@ -785,9 +785,9 @@
 <script>
 // ─── DATA MODEL ──────────────────────────────────────────────────────────────
 
-const CURRENT_FY = '2526';
-const FY_START = new Date('2025-07-01');
-const FY_END   = new Date('2026-06-30');
+const CURRENT_FY = '2627';
+const FY_START = new Date('2026-07-01');
+const FY_END   = new Date('2027-06-30');
 
 const CATEGORIES = {
   income: ['Salary', 'Dividends', 'Interest', 'Capital Gains', 'Other Income'],
@@ -858,6 +858,40 @@ function save(key, val) {
   }
   memStore[key] = json; // in-memory fallback so the app keeps working this session
 }
+
+// One-time migration: split any txns_2526 data by FY boundary and archive pre-July-2026 rows
+(function migrateToFY2627() {
+  if (load('migration_2627_done', false)) return;
+  const old = load('txns_2526', []);
+  if (old.length === 0) { save('migration_2627_done', true); return; }
+  const boundary = '2026-07-01';
+  const fy2526 = old.filter(t => t.date < boundary);
+  const fy2627 = old.filter(t => t.date >= boundary);
+  if (fy2526.length > 0) {
+    const hist = load('history', {});
+    if (!hist['2526']) {
+      const _CAP = new Set(['Investments', 'Savings Transfer']);
+      const income   = fy2526.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const expenses = fy2526.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const capital  = fy2526.filter(t => t.type === 'expense' && _CAP.has(t.category)).reduce((s, t) => s + t.amount, 0);
+      const categories = {};
+      fy2526.filter(t => t.type === 'expense').forEach(t => { categories[t.category] = (categories[t.category] || 0) + t.amount; });
+      hist['2526'] = { income, expenses, capital, categories, txnCount: fy2526.length };
+      save('history', hist);
+    }
+  }
+  const existing = load('txns_2627', []);
+  const keys = new Set(existing.map(t => `${t.date}|${t.amount}|${t.description}`));
+  const newT = fy2627.filter(t => !keys.has(`${t.date}|${t.amount}|${t.description}`));
+  if (newT.length > 0) {
+    save('txns_2627', [...existing, ...newT].sort((a, b) => b.date.localeCompare(a.date)));
+  }
+  const b2526 = load('budgets_2526', {});
+  if (Object.keys(b2526).length > 0 && Object.keys(load('budgets_2627', {})).length === 0) {
+    save('budgets_2627', b2526);
+  }
+  save('migration_2627_done', true);
+})();
 
 let transactions = load('txns_' + CURRENT_FY, []);
 let historicalData = load('history', {});
@@ -1088,7 +1122,7 @@ function exportTransactions() {
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `Budget_FY2526_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `Budget_FY2627_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
 }
 
@@ -1331,25 +1365,25 @@ function renderNextYearPredictions() {
     ['pred-income','pred-expenses','pred-savings','pred-rate'].forEach(id => { document.getElementById(id).textContent = '—'; });
     ['pred-income-delta','pred-expenses-delta','pred-savings-delta','pred-rate-delta','pred-adjustments'].forEach(id => { document.getElementById(id).innerHTML = ''; });
     const adj = document.getElementById('pred-adjustments');
-    if (adj) adj.innerHTML = '<p style="font-size:13px;color:var(--text2);">Add transactions first — predictions are based on your FY 25/26 spending pace.</p>';
+    if (adj) adj.innerHTML = '<p style="font-size:13px;color:var(--text2);">Add transactions first — predictions are based on your FY 26/27 spending pace.</p>';
     return;
   }
   const payRisePct = parseFloat(document.getElementById('pred-pay-rise')?.value ?? 3) / 100;
   const rentIncreaseFn = parseFloat(document.getElementById('pred-rent-increase')?.value ?? 250);
-  const rentFromMonth = document.getElementById('pred-rent-from')?.value ?? '2026-12';
+  const rentFromMonth = document.getElementById('pred-rent-from')?.value ?? '2027-12';
 
-  // FY 26/27 months
+  // FY 27/28 months
   const nextMonths = [];
-  for (let m = 7; m <= 12; m++) nextMonths.push(`2026-${String(m).padStart(2,'0')}`);
-  for (let m = 1; m <= 6; m++)  nextMonths.push(`2027-${String(m).padStart(2,'0')}`);
+  for (let m = 7; m <= 12; m++) nextMonths.push(`2027-${String(m).padStart(2,'0')}`);
+  for (let m = 1; m <= 6; m++)  nextMonths.push(`2028-${String(m).padStart(2,'0')}`);
 
-  // How complete is FY 25/26? Use to annualise partial-year data.
+  // How complete is FY 26/27? Use to annualise partial-year data.
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, Math.min((today - FY_START) / 86400000, fyDays));
   const pctDone = daysDone / fyDays;
 
-  // Base monthly averages from 25/26 (annualised then ÷12)
+  // Base monthly averages from 26/27 (annualised then ÷12)
   const incomeBycat = {};
   transactions.filter(t => t.type === 'income').forEach(t => {
     incomeBycat[t.category] = (incomeBycat[t.category] || 0) + t.amount;
@@ -1475,7 +1509,7 @@ function renderNextYearPredictions() {
         </div>
       </div>
       <div style="font-size:11px;color:var(--text2);line-height:1.6;padding:0 4px;">
-        All other categories carry forward at FY 25/26 pace.<br>
+        All other categories carry forward at FY 26/27 pace.<br>
         Based on <strong>${Math.round(pctDone * 100)}%</strong> of this year complete.
       </div>
     </div>`;
@@ -1757,7 +1791,7 @@ function processBudgetFile(file) {
       const histYears = Object.keys(historicalImport).length;
       const msg = [
         histYears > 0 ? `${histYears} historical year${histYears>1?'s':''} imported` : '',
-        currentTxns.length > 0 ? `${currentTxns.length} transactions added for FY 25/26` : ''
+        currentTxns.length > 0 ? `${currentTxns.length} transactions added for FY 26/27` : ''
       ].filter(Boolean).join(' · ');
       showToast(msg || 'Nothing new to import.', 'success');
     } catch(err) {
@@ -1873,8 +1907,8 @@ function confirmImport() {
 
 function getMonths() {
   const months = [];
-  for (let m=7;m<=12;m++) months.push(`2025-${String(m).padStart(2,'0')}`);
-  for (let m=1;m<=6;m++) months.push(`2026-${String(m).padStart(2,'0')}`);
+  for (let m=7;m<=12;m++) months.push(`2026-${String(m).padStart(2,'0')}`);
+  for (let m=1;m<=6;m++) months.push(`2027-${String(m).padStart(2,'0')}`);
   return months;
 }
 
@@ -2096,22 +2130,22 @@ function renderTaxSummary() {
 // ─── FY ROLLOVER ─────────────────────────────────────────────────────────────
 
 function rolloverFY() {
-  if (!confirm('Archive FY 25/26 and prepare for FY 26/27?\n\nThis will:\n• Save FY 25/26 totals to History\n• Clear this year\'s transactions\n• Keep all budget targets\n\n⚠ After this, upload the updated budget.html file to GitHub so the app shows FY 26/27 headings and dates.\n\nTake a Backup first if you haven\'t already.')) return;
+  if (!confirm('Archive FY 26/27 and prepare for FY 27/28?\n\nThis will:\n• Save FY 26/27 totals to History\n• Clear this year\'s transactions\n• Keep all budget targets\n\n⚠ After this, upload the updated budget.html file to GitHub so the app shows FY 27/28 headings and dates.\n\nTake a Backup first if you haven\'t already.')) return;
 
-  // Compute summary for 25/26
   const income   = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const capital  = transactions.filter(t => t.type === 'expense' && CAPITAL_CATS.has(t.category)).reduce((s, t) => s + t.amount, 0);
+  const categories = {};
+  transactions.filter(t => t.type === 'expense').forEach(t => { categories[t.category] = (categories[t.category]||0) + t.amount; });
 
   const history = load('history', {});
-  history['2526'] = { income, expenses, capital, txnCount: transactions.length, archivedAt: new Date().toISOString() };
+  history['2627'] = { income, expenses, capital, categories, txnCount: transactions.length, archivedAt: new Date().toISOString() };
   save('history', history);
 
-  // Clear transactions
   transactions = [];
-  save('transactions_2526', []);
+  save('txns_' + CURRENT_FY, []);
 
-  showToast('FY 25/26 archived. Reload the page to continue in FY 26/27.', 'success');
+  showToast('FY 26/27 archived. Reload the page to continue in FY 27/28.', 'success');
   renderDashboard();
 }
 
