@@ -1190,7 +1190,7 @@ function renderBudgetProgress() {
 
   const expActuals = {}, incActuals = {};
   transactions.filter(t=>t.type==='expense').forEach(t => { expActuals[t.category] = (expActuals[t.category]||0) + t.amount; });
-  transactions.filter(t=>t.type==='income').forEach(t => { incActuals[t.category] = (incActuals[t.category]||0) + t.amount; });
+  transactions.filter(t=>t.type==='income'&&!CAPITAL_CATS.has(t.category)).forEach(t => { incActuals[t.category] = (incActuals[t.category]||0) + t.amount; });
 
   // FY pace — how far through the year are we?
   const today = new Date();
@@ -1242,7 +1242,7 @@ function renderBudgetProgress() {
 const CAPITAL_CATS = new Set(['Investments', 'Savings Transfer']);
 
 function renderDashboard() {
-  const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const income = transactions.filter(t=>t.type==='income'&&!CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const allExpenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const capital = transactions.filter(t=>t.type==='expense'&&CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const expenses = allExpenses - capital; // true living expenses
@@ -1283,7 +1283,7 @@ function renderDashboard() {
 function renderMonthlyChart() {
   destroyChart('monthly');
   const months = getMonths();
-  const incomeData = months.map(m => transactions.filter(t=>t.type==='income'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const incomeData = months.map(m => transactions.filter(t=>t.type==='income'&&!CAPITAL_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
   const expenseData = months.map(m => transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
 
   charts['monthly'] = new Chart(document.getElementById('chart-monthly'), {
@@ -1385,7 +1385,7 @@ function renderNextYearPredictions() {
 
   // Base monthly averages from 26/27 (annualised then ÷12)
   const incomeBycat = {};
-  transactions.filter(t => t.type === 'income').forEach(t => {
+  transactions.filter(t => t.type === 'income' && !CAPITAL_CATS.has(t.category)).forEach(t => {
     incomeBycat[t.category] = (incomeBycat[t.category] || 0) + t.amount;
   });
   Object.keys(incomeBycat).forEach(c => { incomeBycat[c] = incomeBycat[c] / pctDone / 12; });
@@ -1594,7 +1594,7 @@ function renderHistory() {
 function getAllFYData() {
   const result = { ...historicalData };
   // Add current FY
-  const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const income = transactions.filter(t=>t.type==='income'&&!CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const expenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const categories = {};
   transactions.filter(t=>t.type==='expense').forEach(t=>categories[t.category]=(categories[t.category]||0)+t.amount);
@@ -1661,8 +1661,7 @@ function parseIngCSV(text) {
     const debit  = Math.abs(parseFloat((cols[3]||'').replace(/[,$"]/g,''))||0);
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
-    const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc,'',credit>0?amount:-amount);
+    const { category, type } = autoCategorise(desc, '', credit > 0 ? amount : -amount);
     results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
   }
   return results;
@@ -1684,8 +1683,7 @@ function parseIngXLSX(rows) {
     const debit = parseFloat(String(row[3]||'').replace(/[,$]/g,''))||0;
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
-    const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc);
+    const { category, type } = autoCategorise(desc, '', credit > 0 ? amount : -amount);
     results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
   }
   return results;
@@ -1892,7 +1890,7 @@ function confirmImport() {
     const key = `${t.date||today}|${t.amount}|${t.description}`;
     if (existingKeys.has(key)) return;
     existingKeys.add(key);
-    transactions.push({ id: Date.now()+Math.random(), date:t.date||today, amount:t.amount, category:t.category, description:t.description, company:t.company||'', notes:t.notes||'', type:t.type, bp:t.bp||'personal' });
+    transactions.push({ id: Date.now()+Math.random(), date:t.date||today, amount:t.amount, category:t.category, description:t.description, company:t.company||'', notes:t.notes||'', type: CAPITAL_CATS.has(t.category) ? 'expense' : t.type, bp:t.bp||'personal' });
     added++;
   });
   transactions.sort((a,b)=>b.date.localeCompare(a.date));
@@ -1987,7 +1985,7 @@ function renderSavingsGoal() {
   const input = document.getElementById('savings-goal-input');
   if (input && !input.value && goal) input.value = goal;
 
-  const net = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)
+  const net = transactions.filter(t=>t.type==='income'&&!CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0)
             - transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
 
   const bar = document.getElementById('savings-goal-bar');
@@ -2017,7 +2015,7 @@ function renderSavingsGoal() {
 
 function renderIncomeBreakdown() {
   const totals = {};
-  transactions.filter(t => t.type === 'income').forEach(t => {
+  transactions.filter(t => t.type === 'income' && !CAPITAL_CATS.has(t.category)).forEach(t => {
     totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
   const labels = Object.keys(totals);
@@ -2084,7 +2082,7 @@ function renderMonthlyBudgetWidget(containerId) {
 // ─── TAX SUMMARY ─────────────────────────────────────────────────────────────
 
 function renderTaxSummary() {
-  const income = transactions.filter(t => t.type === 'income');
+  const income = transactions.filter(t => t.type === 'income' && !CAPITAL_CATS.has(t.category));
   const bizExp = transactions.filter(t => t.type === 'expense' && t.bp === 'business');
   const persExp= transactions.filter(t => t.type === 'expense' && t.bp !== 'business');
 
@@ -2132,7 +2130,7 @@ function renderTaxSummary() {
 function rolloverFY() {
   if (!confirm('Archive FY 26/27 and prepare for FY 27/28?\n\nThis will:\n• Save FY 26/27 totals to History\n• Clear this year\'s transactions\n• Keep all budget targets\n\n⚠ After this, upload the updated budget.html file to GitHub so the app shows FY 27/28 headings and dates.\n\nTake a Backup first if you haven\'t already.')) return;
 
-  const income   = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const income   = transactions.filter(t => t.type === 'income' && !CAPITAL_CATS.has(t.category)).reduce((s, t) => s + t.amount, 0);
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const capital  = transactions.filter(t => t.type === 'expense' && CAPITAL_CATS.has(t.category)).reduce((s, t) => s + t.amount, 0);
   const categories = {};
