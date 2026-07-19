@@ -56,6 +56,7 @@
   /* Grid layouts */
   .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .grid-2 > * { min-width: 0; }
   .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
 
   /* Stat cards */
@@ -2698,7 +2699,7 @@ function renderTaxEstimate() {
   const takeHome = grossIncome - total;
   el.innerHTML = `
     <div class="card-title" style="margin-bottom:14px;">Estimated Tax — ${fmtFY(taxFY)} <span style="font-size:10px;font-weight:400;color:var(--text2);">(AU tax brackets incl. LITO, excl. HECS)</span></div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:12px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:12px;">
       <div><div class="card-title">Gross Income</div><div style="font-size:18px;font-weight:700;color:var(--income-color);">${fmt(grossIncome)}</div></div>
       <div><div class="card-title">Deductions</div><div style="font-size:18px;font-weight:700;color:var(--expense-color);">${fmt(deductions)}</div><div style="font-size:10px;color:var(--text2);">Business-tagged expenses</div></div>
       <div><div class="card-title">Income Tax</div><div style="font-size:18px;font-weight:700;color:var(--expense-color);">${fmt(tax)}</div></div>
