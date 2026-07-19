@@ -130,6 +130,8 @@
   thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; box-shadow: 0 1px 0 var(--border); }
   .toast-undo { background: rgba(108,99,255,0.2); border: 1px solid var(--accent); color: var(--accent); font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 6px; cursor: pointer; margin-left: 10px; }
   .toast-undo:hover { background: rgba(108,99,255,0.35); }
+  #learn-btn { background: var(--accent); color: #fff; border-color: var(--accent); animation: pulse-glow 2s ease-in-out infinite; }
+  @keyframes pulse-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(108,99,255,0.4); } 50% { box-shadow: 0 0 0 6px rgba(108,99,255,0); } }
 
   /* Progress bars */
   .progress-bar-wrap { margin-bottom: 16px; }
@@ -882,11 +884,29 @@
         </div>
       </div>
 
+      <!-- Suggestions panel -->
+      <div id="suggestions-panel" style="display:none;margin-top:20px;">
+        <div class="card" style="border:1px solid var(--accent);">
+          <div class="section-header" style="margin-bottom:16px;">
+            <div>
+              <h2 style="margin-bottom:4px;">✨ Smart Suggestions</h2>
+              <div style="font-size:12px;color:var(--text2);">Based on your corrections — apply the same fix to similar rows</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('suggestions-panel').style.display='none'">Dismiss</button>
+          </div>
+          <div id="suggestions-list"></div>
+          <div id="suggestions-empty" style="font-size:13px;color:var(--text2);display:none;padding:8px 0;">
+            No similar uncorrected rows found. Your edits look unique, or all similar rows are already correct.
+          </div>
+        </div>
+      </div>
+
       <!-- Pending review -->
       <div class="card" id="pending-review-card" style="display:none;margin-top:20px;">
         <div class="section-header">
           <h2>Review &amp; Confirm Imported Transactions</h2>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button id="learn-btn" class="btn btn-secondary btn-sm" onclick="generateSuggestions()" style="display:none;background:var(--accent);color:#fff;border-color:var(--accent);">✨ Review Suggestions</button>
             <button class="btn btn-secondary btn-sm" onclick="clearPending()">Clear</button>
             <button class="btn btn-primary btn-sm" onclick="confirmImport()">Confirm Import (<span id="pending-count">0</span>)</button>
           </div>
@@ -1119,6 +1139,7 @@ let transactions = load('txns_' + CURRENT_FY, []);
 let historicalData = load('history', {});
 let budgets = load('budgets_' + CURRENT_FY, {});
 let pendingImport = [];
+const pendingEditTracker = {}; // { idx: { desc, company, origCat, origType, newCat, newType } }
 let editingId = null;
 let currentTransType = 'expense';
 let currentBP = 'personal';
@@ -2439,6 +2460,166 @@ function mapOldExpenseCategory(cat, company, desc) {
   return 'Miscellaneous';
 }
 
+function extractMatchKey(description, company) {
+  if (company && company.trim().length > 2) return company.trim().toLowerCase();
+  // Strip numbers, special chars, take first 2 meaningful words
+  const words = description.replace(/[^a-zA-Z\s]/g, ' ').trim().split(/\s+/).filter(w => w.length > 2);
+  return words.slice(0, 2).join(' ').toLowerCase();
+}
+
+function markPendingEdit(idx, field, newValue) {
+  const t = pendingImport[idx];
+  if (!t) return;
+  if (!pendingEditTracker[idx]) {
+    pendingEditTracker[idx] = {
+      desc: t.description,
+      company: t.company || '',
+      origCat: t.category,
+      origType: t.type,
+      newCat: t.category,
+      newType: t.type
+    };
+  }
+  if (field === 'category') pendingEditTracker[idx].newCat = newValue;
+  if (field === 'type') pendingEditTracker[idx].newType = newValue;
+  // Show the learn button if we have at least one real change
+  const hasChanges = Object.values(pendingEditTracker).some(e =>
+    e.newCat !== e.origCat || e.newType !== e.origType);
+  const btn = document.getElementById('learn-btn');
+  if (btn) btn.style.display = hasChanges ? 'inline-flex' : 'none';
+}
+
+function generateSuggestions() {
+  const panel = document.getElementById('suggestions-panel');
+  const list = document.getElementById('suggestions-list');
+  const empty = document.getElementById('suggestions-empty');
+  if (!panel || !list) return;
+
+  // Build a map of learned corrections from edits that changed the category or type
+  const corrections = {}; // matchKey -> { newCat, newType, sourceDesc, sourceCompany }
+  Object.entries(pendingEditTracker).forEach(([idx, edit]) => {
+    if (edit.newCat === edit.origCat && edit.newType === edit.origType) return; // no real change
+    const key = extractMatchKey(edit.desc, edit.company);
+    if (!key || key.length < 3) return;
+    corrections[key] = { newCat: edit.newCat, newType: edit.newType, sourceDesc: edit.desc, sourceCompany: edit.company, editedIdx: Number(idx) };
+  });
+
+  if (Object.keys(corrections).length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  // For each correction, find unedited pending rows that match the key
+  const suggestionGroups = [];
+  const editedIdxs = new Set(Object.keys(pendingEditTracker).map(Number));
+
+  Object.entries(corrections).forEach(([key, corr]) => {
+    const matches = pendingImport
+      .map((t, i) => ({ t, i }))
+      .filter(({ t, i }) => {
+        if (editedIdxs.has(i)) return false; // skip already-edited rows
+        if (t.category === corr.newCat && t.type === corr.newType) return false; // already correct
+        const tKey = extractMatchKey(t.description, t.company || '');
+        return tKey === key;
+      });
+
+    if (matches.length > 0) {
+      suggestionGroups.push({
+        key,
+        newCat: corr.newCat,
+        newType: corr.newType,
+        sourceDesc: corr.sourceDesc,
+        sourceCompany: corr.sourceCompany,
+        matches: matches.map(m => m.i),
+        id: Math.random().toString(36).slice(2)
+      });
+    }
+  });
+
+  panel.style.display = 'block';
+
+  if (suggestionGroups.length === 0) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  list.innerHTML = suggestionGroups.map(sg => `
+    <div id="sg-${sg.id}" style="padding:14px;background:var(--surface2);border-radius:10px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+        <div>
+          <div style="font-size:14px;font-weight:600;">
+            "${esc(sg.sourceCompany || sg.sourceDesc)}"
+            <span style="font-size:12px;font-weight:400;color:var(--text2);">→ ${esc(sg.newCat)} · ${esc(sg.newType)}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px;">
+            ${sg.matches.length} similar unedited row${sg.matches.length !== 1 ? 's' : ''} found
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:6px;">
+            ${sg.matches.slice(0,3).map(i => `<span style="display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 6px;margin:1px;">${esc(pendingImport[i]?.description?.slice(0,40) || '')}</span>`).join('')}
+            ${sg.matches.length > 3 ? `<span style="color:var(--text2);font-size:11px;">+${sg.matches.length-3} more</span>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:140px;align-items:flex-end;">
+          <button class="btn btn-primary btn-sm" onclick="applySuggestionGroup('${sg.id}', ${JSON.stringify(sg.matches)}, '${escAttr(sg.newCat)}', '${escAttr(sg.newType)}')">Apply to ${sg.matches.length} rows</button>
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sg-${sg.id}').remove();checkSuggestionsEmpty()">Skip</button>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);cursor:pointer;margin-top:2px;">
+            <input type="checkbox" id="save-rule-${sg.id}" style="accent-color:var(--accent);cursor:pointer;"> Save as rule
+          </label>
+        </div>
+      </div>
+    </div>`).join('');
+
+  // Store groups for apply function
+  window._suggestionGroups = suggestionGroups;
+}
+
+function applySuggestionGroup(id, idxs, newCat, newType) {
+  idxs.forEach(i => {
+    if (pendingImport[i]) {
+      pendingImport[i].category = newCat;
+      pendingImport[i].type = newType;
+      // Mark as edited so they don't re-appear in suggestions
+      pendingEditTracker[i] = pendingEditTracker[i] || { desc: pendingImport[i].description, company: pendingImport[i].company || '', origCat: pendingImport[i].category, origType: pendingImport[i].type, newCat, newType };
+      pendingEditTracker[i].newCat = newCat;
+      pendingEditTracker[i].newType = newType;
+    }
+  });
+
+  // Optionally save as a rule
+  const saveChk = document.getElementById(`save-rule-${id}`);
+  if (saveChk && saveChk.checked && window._suggestionGroups) {
+    const sg = window._suggestionGroups.find(g => g.id === id);
+    if (sg) {
+      const pattern = sg.sourceCompany || extractMatchKey(sg.sourceDesc, sg.sourceCompany);
+      if (pattern) {
+        const rules = load('customRules', []);
+        const alreadyExists = rules.some(r => r.pattern.toLowerCase() === pattern.toLowerCase());
+        if (!alreadyExists) {
+          rules.unshift({ pattern, category: newCat, type: newType });
+          save('customRules', rules);
+          showToast(`Rule saved: "${pattern}" → ${newCat}`, 'success');
+        }
+      }
+    }
+  }
+
+  renderPendingTable();
+  // Remove the suggestion card
+  document.getElementById(`sg-${id}`)?.remove();
+  checkSuggestionsEmpty();
+}
+
+function checkSuggestionsEmpty() {
+  const list = document.getElementById('suggestions-list');
+  const empty = document.getElementById('suggestions-empty');
+  if (!list) return;
+  if (list.children.length === 0) {
+    if (empty) { empty.textContent = 'All suggestions resolved. ✓'; empty.style.display = 'block'; }
+  }
+}
+
 function renderPendingTable() {
   document.getElementById('pending-review-card').style.display = pendingImport.length>0 ? 'block' : 'none';
   document.getElementById('pending-count').textContent = pendingImport.length;
@@ -2457,12 +2638,12 @@ function renderPendingTable() {
       <td>${esc(t.description)}</td>
       <td class="${t.type==='income'?'amount-income':'amount-expense'}">${t.type==='expense'?'-':''}${fmt(t.amount)}</td>
       <td>
-        <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].type=this.value.startsWith('income')?'income':'expense'">
+        <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].type=this.value;markPendingEdit(${i},'type',this.value)">
           <option value="income" ${t.type==='income'?'selected':''}>Income</option>
           <option value="expense" ${t.type==='expense'?'selected':''}>Expense</option>
         </select>
       </td>
-      <td><select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].category=this.value">${catOptions}</select></td>
+      <td><select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].category=this.value;markPendingEdit(${i},'category',this.value)">${catOptions}</select></td>
       <td>
         <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].bp=this.value">
           <option value="personal" ${(t.bp||'personal')==='personal'?'selected':''}>Personal</option>
@@ -2479,10 +2660,15 @@ function renderPendingTable() {
     sortedCats().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; importBulkCat.appendChild(o); });
   }
   updateImportBulkBar();
+
+  // Re-check learn button state after re-render
+  const hasChanges = Object.values(pendingEditTracker).some(e => e.newCat !== e.origCat || e.newType !== e.origType);
+  const btn = document.getElementById('learn-btn');
+  if (btn) btn.style.display = hasChanges ? 'inline-flex' : 'none';
 }
 
 function removePending(i) { pendingImport.splice(i,1); renderPendingTable(); }
-function clearPending() { pendingImport=[]; renderPendingTable(); }
+function clearPending() { pendingImport=[]; Object.keys(pendingEditTracker).forEach(k=>delete pendingEditTracker[k]); renderPendingTable(); }
 
 function getImportSelectedIdxs() {
   return [...document.querySelectorAll('.import-select:checked')].map(cb => Number(cb.dataset.idx));
