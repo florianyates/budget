@@ -119,6 +119,12 @@
   .badge-business { background: rgba(108,99,255,0.2); color: var(--accent); }
   .badge-personal { background: rgba(139,146,184,0.15); color: var(--text2); }
   .cat-pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); }
+  .txn-inline { background: transparent; border: 1px solid transparent; color: var(--text); padding: 3px 6px; border-radius: 4px; font-size: 12px; width: 100%; box-sizing: border-box; font-family: inherit; min-width: 0; }
+  .txn-inline:hover { border-color: var(--border); }
+  .txn-inline:focus { border-color: var(--accent); background: var(--surface2); outline: none; }
+  select.txn-inline { cursor: pointer; }
+  .txn-inline-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .txn-amount-input { text-align: right; font-weight: 600; font-size: 13px; width: 90px; }
 
   /* Progress bars */
   .progress-bar-wrap { margin-bottom: 16px; }
@@ -389,15 +395,18 @@
 
     <!-- TAX SUMMARY -->
     <div id="page-tax" class="page">
-      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
-          <h1>Tax Summary — FY 26/27</h1>
-          <p>Business-deductible expenses and income breakdown for your accountant</p>
+          <h1>Tax Summary</h1>
+          <p>Income, deductions and transaction tagging for your AU tax return</p>
         </div>
-        <button class="btn btn-secondary" onclick="window.print()" style="flex-shrink:0;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          Print / Export PDF
-        </button>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+          <select id="tax-fy-select" onchange="renderTaxSummary()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:8px;font-size:13px;"></select>
+          <button class="btn btn-secondary" onclick="window.print()" style="flex-shrink:0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Print / PDF
+          </button>
+        </div>
       </div>
 
       <!-- Top KPIs -->
@@ -408,35 +417,35 @@
           <div class="stat-sub">Gross this FY</div>
         </div>
         <div class="card">
-          <div class="card-title">Total Business Expenses</div>
+          <div class="card-title">Business Deductions</div>
           <div class="stat-value text-expense" id="tax-biz-total">$0</div>
           <div class="stat-sub">Potentially deductible</div>
         </div>
         <div class="card">
-          <div class="card-title">Total Personal Expenses</div>
+          <div class="card-title">Personal Expenses</div>
           <div class="stat-value" id="tax-personal-total">$0</div>
           <div class="stat-sub">Non-deductible</div>
         </div>
         <div class="card">
           <div class="card-title">Taxable Income Est.</div>
           <div class="stat-value text-savings" id="tax-taxable">$0</div>
-          <div class="stat-sub">Income − business expenses</div>
+          <div class="stat-sub">Income − deductions</div>
         </div>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-2" style="margin-bottom:24px;">
         <!-- Business expenses by category -->
         <div class="card">
           <div class="card-title" style="margin-bottom:16px;">Business Expenses by Category</div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Category</th><th style="text-align:right;">Amount</th><th style="text-align:right;">Transactions</th></tr></thead>
+              <thead><tr><th>Category</th><th style="text-align:right;">Amount</th><th style="text-align:right;">Txns</th></tr></thead>
               <tbody id="tax-biz-breakdown"></tbody>
             </table>
           </div>
         </div>
 
-        <!-- Income by category -->
+        <!-- Income by source -->
         <div class="card">
           <div class="card-title" style="margin-bottom:16px;">Income by Source</div>
           <div class="table-wrap">
@@ -445,11 +454,36 @@
               <tbody id="tax-income-breakdown"></tbody>
             </table>
           </div>
-          <div class="card-title" style="margin-top:24px;margin-bottom:16px;">Business Expense Transactions</div>
+        </div>
+      </div>
+
+      <!-- Review & Tag all transactions -->
+      <div class="card">
+        <div class="section-header" style="margin-bottom:16px;">
+          <h2>Review &amp; Tag Transactions</h2>
+          <span id="tax-txns-summary" style="font-size:13px;color:var(--text2);"></span>
+        </div>
+        <div id="tax-no-txns" style="display:none;color:var(--text2);font-size:13px;padding:8px 0 16px;">
+          No transaction-level data found for this year — showing archived summary totals only.
+        </div>
+        <div id="tax-txns-panel">
+          <div class="filter-bar" style="margin-bottom:16px;">
+            <input type="text" id="tax-search" placeholder="Search description or category…" oninput="renderTaxTransactions()" style="flex:1;min-width:180px;">
+            <select id="tax-filter-type" onchange="renderTaxTransactions()">
+              <option value="">All types</option>
+              <option value="income">Income</option>
+              <option value="expense">Expenses</option>
+            </select>
+            <select id="tax-filter-bp" onchange="renderTaxTransactions()">
+              <option value="">All tags</option>
+              <option value="business">Business</option>
+              <option value="personal">Personal</option>
+            </select>
+          </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right;">Amount</th></tr></thead>
-              <tbody id="tax-biz-txns"></tbody>
+              <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th style="text-align:right;">Amount</th><th>Tax Tag</th></tr></thead>
+              <tbody id="tax-all-txns"></tbody>
             </table>
           </div>
         </div>
@@ -605,10 +639,39 @@
         <button class="btn btn-secondary btn-sm" onclick="exportTransactions()">Export CSV</button>
       </div>
 
+      <!-- Bulk action bar -->
+      <div id="bulk-bar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border:1px solid var(--accent);border-radius:10px;">
+        <span id="bulk-count-label" style="font-size:13px;font-weight:600;color:var(--accent);min-width:80px;"></span>
+        <select id="bulk-cat-sel" class="filter-bar" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Category —</option>
+        </select>
+        <select id="bulk-type-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Type —</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+        <select id="bulk-bp-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+          <option value="">— Tax Tag —</option>
+          <option value="personal">Personal</option>
+          <option value="business">Business</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="bulkApply()">Apply to Selected</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearBulkSelection()">Clear</button>
+      </div>
+
       <div class="card">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Company</th><th>Category</th><th>Type</th><th>Tax</th><th>Amount</th><th></th></tr></thead>
+            <thead><tr>
+              <th style="width:32px;"><input type="checkbox" id="select-all-txns" title="Select all" onchange="toggleSelectAll(this.checked)" style="cursor:pointer;accent-color:var(--accent);"></th>
+              <th onclick="sortByCol('date')" style="cursor:pointer;user-select:none;">Date <span id="sort-date">▼</span></th>
+              <th onclick="sortByCol('description')" style="cursor:pointer;user-select:none;">Description / Company <span id="sort-description"></span></th>
+              <th onclick="sortByCol('category')" style="cursor:pointer;user-select:none;">Category <span id="sort-category"></span></th>
+              <th onclick="sortByCol('type')" style="cursor:pointer;user-select:none;">Type <span id="sort-type"></span></th>
+              <th onclick="sortByCol('bp')" style="cursor:pointer;user-select:none;">Tax <span id="sort-bp"></span></th>
+              <th onclick="sortByCol('amount')" style="cursor:pointer;user-select:none;">Amount <span id="sort-amount"></span></th>
+              <th></th>
+            </tr></thead>
             <tbody id="transactions-table"></tbody>
           </table>
         </div>
@@ -902,6 +965,8 @@ let currentTransType = 'expense';
 let currentBP = 'personal';
 let editType = 'expense';
 let editBP = 'personal';
+let txnSortCol = 'date';
+let txnSortDir = -1;
 
 // ─── CHARTS ──────────────────────────────────────────────────────────────────
 
@@ -1056,6 +1121,93 @@ function closeEditModal() {
   editingId = null;
 }
 
+function saveTxnField(id, field, rawValue) {
+  const t = transactions.find(t => t.id == id);
+  if (!t) return;
+  if (field === 'amount') {
+    const n = parseFloat(rawValue);
+    if (isNaN(n) || n < 0) return;
+    t.amount = n;
+    // Update the amount cell colour without re-rendering
+    const row = document.querySelector(`tr[data-txn-id="${id}"]`);
+    if (row) {
+      const inp = row.querySelector('.txn-amount-input');
+      if (inp) inp.style.color = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
+    }
+  } else if (field === 'type') {
+    t.type = rawValue;
+    if (CAPITAL_CATS.has(t.category)) t.type = 'expense';
+    // Sync amount colour
+    const row = document.querySelector(`tr[data-txn-id="${id}"]`);
+    if (row) {
+      const inp = row.querySelector('.txn-amount-input');
+      if (inp) inp.style.color = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
+    }
+  } else {
+    t[field] = rawValue;
+    if (field === 'category' && CAPITAL_CATS.has(rawValue)) t.type = 'expense';
+  }
+  save('txns_' + CURRENT_FY, transactions);
+}
+
+function getSelectedTxnIds() {
+  return [...document.querySelectorAll('.txn-select:checked')].map(cb => Number(cb.dataset.id));
+}
+
+function updateBulkBar() {
+  const ids = getSelectedTxnIds();
+  const bar = document.getElementById('bulk-bar');
+  if (!bar) return;
+  bar.style.display = ids.length > 0 ? 'flex' : 'none';
+  const lbl = document.getElementById('bulk-count-label');
+  if (lbl) lbl.textContent = `${ids.length} selected`;
+  const all = document.querySelectorAll('.txn-select');
+  const selAll = document.getElementById('select-all-txns');
+  if (selAll) {
+    selAll.indeterminate = ids.length > 0 && ids.length < all.length;
+    selAll.checked = all.length > 0 && ids.length === all.length;
+  }
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.txn-select').forEach(cb => { cb.checked = checked; });
+  updateBulkBar();
+}
+
+function bulkApply() {
+  const ids = getSelectedTxnIds();
+  if (ids.length === 0) return;
+  const cat  = document.getElementById('bulk-cat-sel').value;
+  const type = document.getElementById('bulk-type-sel').value;
+  const bp   = document.getElementById('bulk-bp-sel').value;
+  if (!cat && !type && !bp) { showToast('Choose at least one field to apply.', 'error'); return; }
+  ids.forEach(id => {
+    const t = transactions.find(t => t.id == id);
+    if (!t) return;
+    if (cat)  { t.category = cat; if (CAPITAL_CATS.has(cat)) t.type = 'expense'; }
+    if (type) t.type = type;
+    if (bp)   t.bp = bp;
+  });
+  save('txns_' + CURRENT_FY, transactions);
+  renderTransactions();
+  showToast(`Updated ${ids.length} transaction${ids.length > 1 ? 's' : ''}.`, 'success');
+}
+
+function clearBulkSelection() {
+  document.querySelectorAll('.txn-select').forEach(cb => { cb.checked = false; });
+  updateBulkBar();
+}
+
+function sortByCol(col) {
+  if (txnSortCol === col) {
+    txnSortDir *= -1;
+  } else {
+    txnSortCol = col;
+    txnSortDir = (col === 'amount') ? -1 : (col === 'date' ? -1 : 1);
+  }
+  renderTransactions();
+}
+
 // ─── RENDER TRANSACTIONS ─────────────────────────────────────────────────────
 
 function renderTransactions() {
@@ -1070,6 +1222,12 @@ function renderTransactions() {
   if (catSel && catSel.options.length <= 1) {
     [...CATEGORIES.income, ...CATEGORIES.expense].forEach(c => {
       const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o);
+    });
+  }
+  const bulkCatSel = document.getElementById('bulk-cat-sel');
+  if (bulkCatSel && bulkCatSel.options.length <= 1) {
+    [...CATEGORIES.income, ...CATEGORIES.expense].forEach(c => {
+      const o = document.createElement('option'); o.value = c; o.textContent = c; bulkCatSel.appendChild(o);
     });
   }
   const monthSel = document.getElementById('filter-month');
@@ -1091,23 +1249,68 @@ function renderTransactions() {
     return true;
   });
 
+  // Sort
+  filtered.sort((a, b) => {
+    let av = a[txnSortCol] ?? '', bv = b[txnSortCol] ?? '';
+    if (txnSortCol === 'amount') return (a.amount - b.amount) * txnSortDir;
+    if (txnSortCol === 'bp') { av = a.bp || 'personal'; bv = b.bp || 'personal'; }
+    return String(av).localeCompare(String(bv)) * txnSortDir;
+  });
+
+  // Update sort arrows
+  ['date','description','category','type','bp','amount'].forEach(col => {
+    const el = document.getElementById('sort-' + col);
+    if (el) el.textContent = txnSortCol === col ? (txnSortDir === 1 ? ' ▲' : ' ▼') : '';
+  });
+
   const tbody = document.getElementById('transactions-table');
   tbody.innerHTML = '';
   document.getElementById('txn-empty').style.display = filtered.length === 0 ? 'block' : 'none';
 
+  const allCatOpts = (sel) => [...CATEGORIES.income, ...CATEGORIES.expense]
+    .map(c => `<option value="${escAttr(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
+
   filtered.forEach(t => {
     const tr = document.createElement('tr');
+    tr.dataset.txnId = t.id;
+    const amtColor = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
     tr.innerHTML = `
-      <td>${fmtDate(t.date)}</td>
-      <td><div style="font-weight:600;font-size:13px;">${esc(t.description||'—')}</div>${t.notes?`<div style="font-size:11px;color:var(--text2);">${esc(t.notes)}</div>`:''}
+      <td style="width:32px;padding:8px;">
+        <input type="checkbox" class="txn-select" data-id="${t.id}" onchange="updateBulkBar()" style="cursor:pointer;accent-color:var(--accent);">
       </td>
-      <td style="color:var(--text2);font-size:13px;">${esc(t.company||'—')}</td>
-      <td><span class="cat-pill">${esc(t.category)}</span></td>
-      <td><span style="font-size:12px;color:${t.type==='income'?'var(--income-color)':'var(--expense-color)'};">${t.type}</span></td>
-      <td><span class="badge badge-${t.bp||'personal'}">${t.bp||'personal'}</span></td>
-      <td class="amount-${t.type}">${t.type==='expense'?'-':''}${fmt(t.amount)}</td>
-      <td style="display:flex;gap:6px;padding:10px 12px;">
-        <button class="btn btn-secondary btn-sm btn-icon" onclick="openEditModal(${t.id})" title="Edit">✏️</button>
+      <td style="min-width:120px;">
+        <input type="date" class="txn-inline" value="${t.date}"
+          onchange="saveTxnField(${t.id},'date',this.value)">
+      </td>
+      <td style="min-width:180px;">
+        <input type="text" class="txn-inline" value="${escAttr(t.description||'')}" placeholder="Description"
+          onchange="saveTxnField(${t.id},'description',this.value)">
+        <input type="text" class="txn-inline txn-inline-sub" value="${escAttr(t.company||'')}" placeholder="Company"
+          onchange="saveTxnField(${t.id},'company',this.value)">
+      </td>
+      <td style="min-width:155px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'category',this.value)">
+          ${allCatOpts(t.category)}
+        </select>
+      </td>
+      <td style="min-width:95px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'type',this.value)">
+          <option value="income"${t.type==='income'?' selected':''}>Income</option>
+          <option value="expense"${t.type==='expense'?' selected':''}>Expense</option>
+        </select>
+      </td>
+      <td style="min-width:100px;">
+        <select class="txn-inline" onchange="saveTxnField(${t.id},'bp',this.value)">
+          <option value="personal"${(t.bp||'personal')==='personal'?' selected':''}>Personal</option>
+          <option value="business"${t.bp==='business'?' selected':''}>Business</option>
+        </select>
+      </td>
+      <td style="min-width:95px;">
+        <input type="number" class="txn-inline txn-amount-input" value="${t.amount}" min="0" step="0.01"
+          style="color:${amtColor};"
+          onchange="saveTxnField(${t.id},'amount',this.value)">
+      </td>
+      <td style="padding:8px;">
         <button class="btn btn-danger btn-sm btn-icon" onclick="deleteTransaction(${t.id})" title="Delete">🗑</button>
       </td>`;
     tbody.appendChild(tr);
@@ -1971,6 +2174,7 @@ function csvSplit(line) {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
 
 // ─── BACKUP / RESTORE ────────────────────────────────────────────────────────
 
@@ -2083,31 +2287,65 @@ function renderMonthlyBudgetWidget(containerId) {
 
 // ─── TAX SUMMARY ─────────────────────────────────────────────────────────────
 
+let taxFY = CURRENT_FY;
+let taxPageTxns = []; // all transactions for the currently-viewed FY
+
 function renderTaxSummary() {
-  const income = transactions.filter(t => t.type === 'income');
-  const bizExp = transactions.filter(t => t.type === 'expense' && t.bp === 'business');
-  const persExp= transactions.filter(t => t.type === 'expense' && t.bp !== 'business');
+  // Build / refresh FY selector
+  const sel = document.getElementById('tax-fy-select');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const fys = new Set([CURRENT_FY, ...Object.keys(historicalData)]);
+    ['2526','2425','2324','2223'].forEach(fy => { if (load('txns_'+fy,[]).length > 0) fys.add(fy); });
+    [...fys].sort().reverse().forEach(fy => {
+      const o = document.createElement('option');
+      o.value = fy;
+      o.textContent = fmtFY(fy) + (fy === CURRENT_FY ? ' (Current)' : '');
+      if (fy === (prev || CURRENT_FY)) o.selected = true;
+      sel.appendChild(o);
+    });
+    taxFY = sel.value || CURRENT_FY;
+  }
 
-  const totalIncome  = income.reduce((s, t) => s + t.amount, 0);
-  const totalBiz     = bizExp.reduce((s, t) => s + t.amount, 0);
-  const totalPersonal= persExp.reduce((s, t) => s + t.amount, 0);
-  const taxable      = totalIncome - totalBiz;
+  taxPageTxns = taxFY === CURRENT_FY
+    ? [...transactions]
+    : load('txns_' + taxFY, []);
 
-  document.getElementById('tax-total-income').textContent  = fmt(totalIncome);
-  document.getElementById('tax-biz-total').textContent     = fmt(totalBiz);
-  document.getElementById('tax-personal-total').textContent= fmt(totalPersonal);
-  document.getElementById('tax-taxable').textContent       = fmt(Math.max(0, taxable));
+  const hasTxns = taxPageTxns.length > 0;
+  const noTxnsEl = document.getElementById('tax-no-txns');
+  const panelEl  = document.getElementById('tax-txns-panel');
+  if (noTxnsEl) noTxnsEl.style.display = hasTxns ? 'none' : 'block';
+  if (panelEl)  panelEl.style.display  = hasTxns ? 'block' : 'none';
 
-  // Business expenses by category
-  const bizByCat = {};
-  const bizCatCount = {};
+  renderTaxKPIs();
+  if (hasTxns) renderTaxTransactions();
+}
+
+function renderTaxKPIs() {
+  const income  = taxPageTxns.filter(t => t.type === 'income' && !CAPITAL_CATS.has(t.category));
+  const bizExp  = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business');
+  const persExp = taxPageTxns.filter(t => t.type === 'expense' && t.bp !== 'business');
+
+  const totalIncome   = income.reduce((s, t) => s + t.amount, 0);
+  const totalBiz      = bizExp.reduce((s, t) => s + t.amount, 0);
+  const totalPersonal = persExp.reduce((s, t) => s + t.amount, 0);
+  const taxable       = totalIncome - totalBiz;
+
+  document.getElementById('tax-total-income').textContent   = fmt(totalIncome);
+  document.getElementById('tax-biz-total').textContent      = fmt(totalBiz);
+  document.getElementById('tax-personal-total').textContent = fmt(totalPersonal);
+  document.getElementById('tax-taxable').textContent        = fmt(Math.max(0, taxable));
+
+  // Business by category
+  const bizByCat = {}, bizCount = {};
   bizExp.forEach(t => {
-    bizByCat[t.category]    = (bizByCat[t.category] || 0) + t.amount;
-    bizCatCount[t.category] = (bizCatCount[t.category] || 0) + 1;
+    bizByCat[t.category] = (bizByCat[t.category] || 0) + t.amount;
+    bizCount[t.category] = (bizCount[t.category] || 0) + 1;
   });
   const bizRows = Object.entries(bizByCat).sort((a, b) => b[1] - a[1]);
   document.getElementById('tax-biz-breakdown').innerHTML = bizRows.length
-    ? bizRows.map(([cat, amt]) => `<tr><td>${cat}</td><td style="text-align:right;color:var(--expense-color);font-weight:600;">${fmt(amt)}</td><td style="text-align:right;color:var(--text2);">${bizCatCount[cat]}</td></tr>`).join('')
+    ? bizRows.map(([c, a]) => `<tr><td>${c}</td><td style="text-align:right;color:var(--expense-color);font-weight:600;">${fmt(a)}</td><td style="text-align:right;color:var(--text2);">${bizCount[c]}</td></tr>`).join('')
       + `<tr style="border-top:2px solid var(--border);"><td style="font-weight:700;">Total</td><td style="text-align:right;font-weight:700;color:var(--expense-color);">${fmt(totalBiz)}</td><td></td></tr>`
     : '<tr><td colspan="3" style="color:var(--text2);padding:20px;text-align:center;">No business expenses tagged yet</td></tr>';
 
@@ -2116,15 +2354,114 @@ function renderTaxSummary() {
   income.forEach(t => { incByCat[t.category] = (incByCat[t.category] || 0) + t.amount; });
   const incRows = Object.entries(incByCat).sort((a, b) => b[1] - a[1]);
   document.getElementById('tax-income-breakdown').innerHTML = incRows.length
-    ? incRows.map(([cat, amt]) => `<tr><td>${cat}</td><td style="text-align:right;color:var(--income-color);font-weight:600;">${fmt(amt)}</td><td style="text-align:right;color:var(--text2);">${((amt/totalIncome)*100).toFixed(1)}%</td></tr>`).join('')
+    ? incRows.map(([c, a]) => `<tr><td>${c}</td><td style="text-align:right;color:var(--income-color);font-weight:600;">${fmt(a)}</td><td style="text-align:right;color:var(--text2);">${((a/totalIncome)*100).toFixed(1)}%</td></tr>`).join('')
       + `<tr style="border-top:2px solid var(--border);"><td style="font-weight:700;">Total</td><td style="text-align:right;font-weight:700;color:var(--income-color);">${fmt(totalIncome)}</td><td></td></tr>`
     : '<tr><td colspan="3" style="color:var(--text2);padding:20px;text-align:center;">No income recorded yet</td></tr>';
 
-  // Full biz transaction list
-  const sorted = [...bizExp].sort((a, b) => b.date.localeCompare(a.date));
-  document.getElementById('tax-biz-txns').innerHTML = sorted.length
-    ? sorted.map(t => `<tr><td>${fmtDate(t.date)}</td><td>${esc(t.description||'—')}</td><td><span class="cat-pill">${esc(t.category)}</span></td><td style="text-align:right;color:var(--expense-color);font-weight:600;">${fmt(t.amount)}</td></tr>`).join('')
-    : '<tr><td colspan="4" style="color:var(--text2);padding:20px;text-align:center;">No business transactions tagged yet</td></tr>';
+  const bizTagged = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business').length;
+  const summaryEl = document.getElementById('tax-txns-summary');
+  if (summaryEl) summaryEl.textContent = `${taxPageTxns.length} transactions · ${bizTagged} tagged as business`;
+}
+
+function renderTaxTransactions() {
+  const search = (document.getElementById('tax-search')?.value || '').toLowerCase();
+  const typeF  = document.getElementById('tax-filter-type')?.value || '';
+  const bpF    = document.getElementById('tax-filter-bp')?.value || '';
+
+  const filtered = taxPageTxns
+    .map((t, idx) => ({ ...t, _idx: idx }))
+    .filter(t => {
+      if (typeF && t.type !== typeF) return false;
+      if (bpF  && (t.bp || 'personal') !== bpF) return false;
+      if (search && !`${t.description||''} ${t.category||''} ${t.company||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const tbody = document.getElementById('tax-all-txns');
+  if (!tbody) return;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text2);padding:20px;text-align:center;">No transactions match your filters</td></tr>';
+    return;
+  }
+
+  const taxCatOpts = (sel) => [...CATEGORIES.income, ...CATEGORIES.expense]
+    .map(c => `<option value="${escAttr(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
+
+  tbody.innerHTML = filtered.map(t => {
+    const amtColor = t.type === 'income' ? 'var(--income-color)' : 'var(--expense-color)';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text2);min-width:95px;">${fmtDate(t.date)}</td>
+      <td style="font-size:13px;min-width:160px;">${esc(t.description || '—')}${t.company?`<div style="font-size:11px;color:var(--text2);">${esc(t.company)}</div>`:''}
+      </td>
+      <td style="min-width:150px;">
+        <select class="txn-inline" onchange="saveTaxTxnField(${t._idx},'category',this.value)">
+          ${taxCatOpts(t.category)}
+        </select>
+      </td>
+      <td style="min-width:90px;">
+        <select class="txn-inline" onchange="saveTaxTxnField(${t._idx},'type',this.value)">
+          <option value="income"${t.type==='income'?' selected':''}>Income</option>
+          <option value="expense"${t.type==='expense'?' selected':''}>Expense</option>
+        </select>
+      </td>
+      <td style="min-width:90px;text-align:right;">
+        <input type="number" class="txn-inline txn-amount-input" value="${t.amount}" min="0" step="0.01"
+          style="color:${amtColor};" onchange="saveTaxTxnField(${t._idx},'amount',this.value)">
+      </td>
+      <td style="min-width:100px;">
+        <select class="txn-inline" onchange="saveTaxTxnField(${t._idx},'bp',this.value)">
+          <option value="personal"${(t.bp||'personal')==='personal'?' selected':''}>Personal</option>
+          <option value="business"${t.bp==='business'?' selected':''}>Business</option>
+        </select>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function saveTaxTxnField(idx, field, rawValue) {
+  if (idx < 0 || idx >= taxPageTxns.length) return;
+  const t = taxPageTxns[idx];
+  const origAmount = t.amount;
+  if (field === 'amount') {
+    const n = parseFloat(rawValue);
+    if (isNaN(n) || n < 0) return;
+    t.amount = n;
+  } else {
+    t[field] = rawValue;
+    if (field === 'category' && CAPITAL_CATS.has(rawValue)) t.type = 'expense';
+  }
+  if (taxFY === CURRENT_FY) {
+    const li = transactions.findIndex(x => x.id === t.id ||
+      (x.date === t.date && Math.abs(x.amount - origAmount) < 0.01 && x.description === t.description));
+    if (li >= 0) {
+      transactions[li][field] = t[field];
+      if (field === 'category' && CAPITAL_CATS.has(rawValue)) transactions[li].type = 'expense';
+    }
+    save('txns_' + CURRENT_FY, transactions);
+  } else {
+    save('txns_' + taxFY, taxPageTxns);
+  }
+  renderTaxKPIs();
+}
+
+function toggleTaxBP(idx, newBP) {
+  if (idx < 0 || idx >= taxPageTxns.length) return;
+  taxPageTxns[idx].bp = newBP;
+
+  if (taxFY === CURRENT_FY) {
+    const t = taxPageTxns[idx];
+    const li = transactions.findIndex(x => x.id === t.id ||
+      (x.date === t.date && Math.abs(x.amount - t.amount) < 0.01 && x.description === t.description));
+    if (li >= 0) transactions[li].bp = newBP;
+    save('txns_' + CURRENT_FY, transactions);
+  } else {
+    save('txns_' + taxFY, taxPageTxns);
+  }
+
+  renderTaxKPIs();
+  renderTaxTransactions();
 }
 
 // ─── FY ROLLOVER ─────────────────────────────────────────────────────────────
