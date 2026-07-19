@@ -105,6 +105,7 @@
   .toggle-btn-bp:first-child { border-radius: 8px 0 0 8px; }
   .toggle-btn-bp:last-child { border-radius: 0 8px 8px 0; border-left: none; }
   .toggle-btn-bp.active { background: rgba(108,99,255,0.2); color: var(--accent); border-color: var(--accent); }
+  .toggle-btn-bp.active-personal { background: rgba(108,99,255,0.2); color: var(--accent); border-color: var(--accent); }
 
   /* Table */
   .table-wrap { overflow-x: auto; }
@@ -491,7 +492,14 @@
       <div class="card">
         <div class="section-header" style="margin-bottom:16px;">
           <h2>Review &amp; Tag Transactions</h2>
-          <span id="tax-txns-summary" style="font-size:13px;color:var(--text2);"></span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span id="tax-txns-summary" style="font-size:13px;color:var(--text2);"></span>
+            <div class="toggle-group">
+              <button id="tax-show-all-btn" class="toggle-btn-bp active-personal" onclick="setTaxBPFilter('')">All</button>
+              <button id="tax-show-business-btn" class="toggle-btn-bp" onclick="setTaxBPFilter('business')">Business</button>
+              <button id="tax-show-personal-btn" class="toggle-btn-bp" onclick="setTaxBPFilter('personal')">Personal</button>
+            </div>
+          </div>
         </div>
         <div id="tax-no-txns" style="display:none;color:var(--text2);font-size:13px;padding:8px 0 16px;">
           No transaction-level data found for this year — showing archived summary totals only.
@@ -533,7 +541,12 @@
             <table>
               <thead><tr>
                 <th style="width:32px;"><input type="checkbox" id="select-all-tax-txns" title="Select all" onchange="toggleSelectAllTax(this.checked)" style="cursor:pointer;accent-color:var(--accent);"></th>
-                <th>Date</th><th>Description</th><th>Category</th><th>Type</th><th style="text-align:right;">Amount</th><th>Tax Tag</th>
+                <th onclick="sortTaxByCol('date')" style="cursor:pointer;user-select:none;">Date <span id="tax-sort-date">▼</span></th>
+                <th onclick="sortTaxByCol('description')" style="cursor:pointer;user-select:none;">Description <span id="tax-sort-description"></span></th>
+                <th onclick="sortTaxByCol('category')" style="cursor:pointer;user-select:none;">Category <span id="tax-sort-category"></span></th>
+                <th onclick="sortTaxByCol('type')" style="cursor:pointer;user-select:none;">Type <span id="tax-sort-type"></span></th>
+                <th onclick="sortTaxByCol('amount')" style="cursor:pointer;user-select:none;text-align:right;">Amount <span id="tax-sort-amount"></span></th>
+                <th onclick="sortTaxByCol('bp')" style="cursor:pointer;user-select:none;">Tax Tag <span id="tax-sort-bp"></span></th>
               </tr></thead>
               <tbody id="tax-all-txns"></tbody>
             </table>
@@ -744,8 +757,14 @@
       </div>
 
       <div class="card" style="margin-bottom:24px;">
-        <div class="section-header"><h2>Expense Budget Targets (Annual)</h2>
-          <button class="btn btn-primary btn-sm" onclick="saveBudgets()">Save Targets</button>
+        <div class="section-header">
+          <h2>Expense Budget Targets (Annual)</h2>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;">
+              <input type="checkbox" id="hide-zero-budgets" onchange="renderBudgets()" style="accent-color:var(--accent);cursor:pointer;"> Hide unconfigured
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="saveBudgets()">Save Targets</button>
+          </div>
         </div>
         <p class="text-muted" style="font-size:13px;margin-bottom:20px;">Set your annual target for each category. Monthly budget = annual ÷ 12.</p>
         <div id="budget-inputs-expense" class="grid-3"></div>
@@ -758,15 +777,57 @@
         <div id="budget-inputs-income" class="grid-3"></div>
       </div>
 
+      <!-- Custom categories -->
       <div class="card" style="margin-bottom:24px;">
-        <div class="section-header"><h2>Progress vs Budget — Current Year</h2></div>
+        <div class="section-header" style="margin-bottom:16px;"><h2>Custom Categories</h2></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Income</div>
+            <div id="custom-cats-income" style="margin-bottom:10px;"></div>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="new-income-cat" placeholder="e.g. Freelance" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;">
+              <button class="btn btn-primary btn-sm" onclick="addCustomCategory('income',document.getElementById('new-income-cat').value);document.getElementById('new-income-cat').value=''">Add</button>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Expense</div>
+            <div id="custom-cats-expense" style="margin-bottom:10px;"></div>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="new-expense-cat" placeholder="e.g. Kids / Pets" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;">
+              <button class="btn btn-primary btn-sm" onclick="addCustomCategory('expense',document.getElementById('new-expense-cat').value);document.getElementById('new-expense-cat').value=''">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:24px;">
+        <div class="section-header">
+          <h2>Progress vs Budget — Current Year</h2>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;color:var(--text2);">Sort:</span>
+            <select id="budget-progress-sort" onchange="renderBudgetProgress()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+              <option value="default">Default</option>
+              <option value="name">Name A–Z</option>
+              <option value="pct-desc">% Used (high first)</option>
+              <option value="pct-asc">% Used (low first)</option>
+              <option value="spent-desc">Amount Spent (high first)</option>
+              <option value="overspend">Overspend first</option>
+            </select>
+          </div>
+        </div>
         <div id="budget-progress-detail"></div>
       </div>
 
       <div class="card">
-        <div class="section-header" style="margin-bottom:16px;">
+        <div class="section-header">
           <h2>This Month vs Monthly Budget</h2>
-          <span style="font-size:13px;color:var(--text2);" id="budget-month-label"></span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:13px;color:var(--text2);" id="budget-month-label"></span>
+            <div class="toggle-group">
+              <button id="budget-view-monthly-btn" class="toggle-btn-bp active-personal" onclick="setBudgetView('monthly')">Monthly</button>
+              <button id="budget-view-annual-btn" class="toggle-btn-bp" onclick="setBudgetView('annual')">Annual</button>
+            </div>
+          </div>
         </div>
         <div id="budget-monthly-detail"></div>
       </div>
@@ -803,6 +864,24 @@
         </div>
       </div>
 
+      <!-- Auto-categorisation rules -->
+      <div class="card" style="margin-top:20px;">
+        <div class="section-header" style="margin-bottom:16px;"><h2>Auto-Categorisation Rules</h2><span style="font-size:12px;color:var(--text2);">Checked before built-in rules on every import</span></div>
+        <div id="custom-rules-list" style="margin-bottom:16px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border);">
+          <input type="text" id="new-rule-pattern" placeholder="Pattern (e.g. woolworths or regex)" style="flex:2;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;">
+          <select id="new-rule-cat" style="flex:1;min-width:130px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;">
+            <option value="">— Category —</option>
+          </select>
+          <select id="new-rule-type" style="padding:6px 10px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:13px;">
+            <option value="">— Type —</option>
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="addCustomRule()">Add Rule</button>
+        </div>
+      </div>
+
       <!-- Pending review -->
       <div class="card" id="pending-review-card" style="display:none;margin-top:20px;">
         <div class="section-header">
@@ -812,10 +891,32 @@
             <button class="btn btn-primary btn-sm" onclick="confirmImport()">Confirm Import (<span id="pending-count">0</span>)</button>
           </div>
         </div>
-        <p class="text-muted" style="font-size:13px;margin-bottom:16px;">Review auto-categorised transactions. Adjust categories before importing.</p>
+        <p class="text-muted" style="font-size:13px;margin-bottom:12px;">Review auto-categorised transactions. Adjust categories before importing.</p>
+        <!-- Import bulk action bar -->
+        <div id="import-bulk-bar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;margin-bottom:10px;background:var(--surface2);border:1px solid var(--accent);border-radius:10px;">
+          <span id="import-bulk-count-label" style="font-size:13px;font-weight:600;color:var(--accent);min-width:80px;"></span>
+          <select id="import-bulk-cat-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <option value="">— Category —</option>
+          </select>
+          <select id="import-bulk-type-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <option value="">— Type —</option>
+            <option value="income">Income</option>
+            <option value="expense">Expense</option>
+          </select>
+          <select id="import-bulk-bp-sel" style="padding:6px 10px;font-size:12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <option value="">— Tax Tag —</option>
+            <option value="personal">Personal</option>
+            <option value="business">Business</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="importBulkApply()">Apply to Selected</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearImportBulkSelection()">Clear</button>
+        </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Business/Personal</th><th></th></tr></thead>
+            <thead><tr>
+              <th style="width:32px;"><input type="checkbox" id="select-all-import" title="Select all" onchange="toggleSelectAllImport(this.checked)" style="cursor:pointer;accent-color:var(--accent);"></th>
+              <th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Business/Personal</th><th></th>
+            </tr></thead>
             <tbody id="pending-table"></tbody>
           </table>
         </div>
@@ -942,6 +1043,11 @@ const CAT_RULES = [
 
 function autoCategorise(description, company='', amount=0) {
   const text = `${description} ${company}`.toLowerCase();
+  // User-defined rules take priority
+  const customRules = load('customRules', []);
+  for (const r of customRules) {
+    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type }; } catch {}
+  }
   for (const [pattern, category, type] of CAT_RULES) {
     if (typeof pattern === 'string' ? text.includes(pattern) : pattern.test(text)) {
       return { category, type };
@@ -1020,6 +1126,8 @@ let editType = 'expense';
 let editBP = 'personal';
 let txnSortCol = 'date';
 let txnSortDir = -1;
+let taxSortCol = 'date';
+let taxSortDir = -1;
 let pendingUndo = null;
 let undoTimer = null;
 
@@ -1055,7 +1163,8 @@ function showPage(id) {
 
   if (id === 'dashboard') renderDashboard();
   else if (id === 'transactions') renderTransactions();
-  else if (id === 'budgets') renderBudgets();
+  else if (id === 'budgets') { renderBudgets(); renderCustomCategories(); }
+  else if (id === 'upload') renderCustomRules();
   else if (id === 'history') renderHistory();
   else if (id === 'predictions') renderNextYearPredictions();
   else if (id === 'tax') renderTaxSummary();
@@ -1275,9 +1384,100 @@ function clearBulkSelection() {
   updateBulkBar();
 }
 
-// Returns all categories sorted alphabetically (income + expense combined)
+// Returns all categories sorted alphabetically (income + expense combined), including user-defined
 function sortedCats() {
-  return [...CATEGORIES.income, ...CATEGORIES.expense].sort((a, b) => a.localeCompare(b));
+  const custom = load('customCategories', {income:[], expense:[]});
+  return [...new Set([...CATEGORIES.income, ...CATEGORIES.expense, ...(custom.income||[]), ...(custom.expense||[])])].sort((a, b) => a.localeCompare(b));
+}
+
+function allCategoriesByType() {
+  const custom = load('customCategories', {income:[], expense:[]});
+  return {
+    income: [...new Set([...CATEGORIES.income, ...(custom.income||[])])].sort((a, b) => a.localeCompare(b)),
+    expense: [...new Set([...CATEGORIES.expense, ...(custom.expense||[])])].sort((a, b) => a.localeCompare(b))
+  };
+}
+
+function addCustomCategory(type, name) {
+  name = name.trim();
+  if (!name) return;
+  const all = [...CATEGORIES.income, ...CATEGORIES.expense];
+  const custom = load('customCategories', {income:[], expense:[]});
+  if (all.includes(name) || (custom[type]||[]).includes(name)) { showToast('Category already exists.', 'error'); return; }
+  custom[type] = [...(custom[type]||[]), name];
+  save('customCategories', custom);
+  renderCustomCategories();
+  showToast(`Added "${name}" to ${type} categories.`, 'success');
+}
+
+function removeCustomCategory(type, name) {
+  const custom = load('customCategories', {income:[], expense:[]});
+  custom[type] = (custom[type]||[]).filter(c => c !== name);
+  save('customCategories', custom);
+  renderCustomCategories();
+  showToast(`Removed "${name}".`, 'success');
+}
+
+function renderCustomCategories() {
+  const custom = load('customCategories', {income:[], expense:[]});
+  ['income','expense'].forEach(type => {
+    const el = document.getElementById(`custom-cats-${type}`);
+    if (!el) return;
+    const cats = custom[type] || [];
+    el.innerHTML = cats.length === 0
+      ? `<span style="font-size:12px;color:var(--text2);">None added yet.</span>`
+      : cats.map(c => `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:3px 10px;font-size:12px;margin:2px;">
+          ${esc(c)}
+          <button onclick="removeCustomCategory('${type}','${escAttr(c)}')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:11px;padding:0 2px;line-height:1;">✕</button>
+        </span>`).join('');
+  });
+}
+
+function renderCustomRules() {
+  const catSel = document.getElementById('new-rule-cat');
+  if (catSel && catSel.options.length <= 1) {
+    sortedCats().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o); });
+  }
+  const rules = load('customRules', []);
+  const el = document.getElementById('custom-rules-list');
+  if (!el) return;
+  el.innerHTML = rules.length === 0
+    ? '<p style="font-size:12px;color:var(--text2);">No rules yet. Rules are checked before built-in rules.</p>'
+    : `<table style="width:100%;font-size:12px;border-collapse:collapse;">
+        <thead><tr style="color:var(--text2);font-size:11px;">
+          <th style="text-align:left;padding:4px 8px;font-weight:600;">Pattern (text / regex)</th>
+          <th style="text-align:left;padding:4px 8px;font-weight:600;">Category</th>
+          <th style="text-align:left;padding:4px 8px;font-weight:600;">Type</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rules.map((r, i) => `<tr style="border-top:1px solid var(--border);">
+          <td style="padding:6px 8px;font-family:monospace;">${esc(r.pattern)}</td>
+          <td style="padding:6px 8px;">${esc(r.category)}</td>
+          <td style="padding:6px 8px;">${esc(r.type)}</td>
+          <td style="padding:6px 8px;"><button onclick="removeCustomRule(${i})" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:13px;">✕</button></td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+}
+
+function addCustomRule() {
+  const pattern = document.getElementById('new-rule-pattern').value.trim();
+  const category = document.getElementById('new-rule-cat').value;
+  const type = document.getElementById('new-rule-type').value;
+  if (!pattern || !category || !type) { showToast('Fill in all rule fields.', 'error'); return; }
+  try { new RegExp(pattern, 'i'); } catch { showToast('Invalid regex pattern.', 'error'); return; }
+  const rules = load('customRules', []);
+  rules.unshift({ pattern, category, type });
+  save('customRules', rules);
+  document.getElementById('new-rule-pattern').value = '';
+  renderCustomRules();
+  showToast('Rule added — will apply on next import.', 'success');
+}
+
+function removeCustomRule(i) {
+  const rules = load('customRules', []);
+  rules.splice(i, 1);
+  save('customRules', rules);
+  renderCustomRules();
 }
 
 // ─── TAX SUMMARY BULK EDIT ───────────────────────────────────────────────────
@@ -1342,6 +1542,15 @@ function clearTaxBulkSelection() {
   updateTaxBulkBar();
 }
 
+function setTaxBPFilter(val) {
+  const sel = document.getElementById('tax-filter-bp');
+  if (sel) sel.value = val;
+  document.getElementById('tax-show-all-btn')?.classList.toggle('active-personal', val === '');
+  document.getElementById('tax-show-business-btn')?.classList.toggle('active-personal', val === 'business');
+  document.getElementById('tax-show-personal-btn')?.classList.toggle('active-personal', val === 'personal');
+  renderTaxTransactions();
+}
+
 function sortByCol(col) {
   if (txnSortCol === col) {
     txnSortDir *= -1;
@@ -1350,6 +1559,11 @@ function sortByCol(col) {
     txnSortDir = (col === 'amount') ? -1 : (col === 'date' ? -1 : 1);
   }
   renderTransactions();
+}
+
+function sortTaxByCol(col) {
+  if (taxSortCol === col) { taxSortDir *= -1; } else { taxSortCol = col; taxSortDir = -1; }
+  renderTaxTransactions();
 }
 
 // ─── RENDER TRANSACTIONS ─────────────────────────────────────────────────────
@@ -1491,7 +1705,10 @@ function catId(cat) { return cat.replace(/[^a-zA-Z0-9]/g,'-'); }
 function renderBudgetInputs(containerId, type) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
-  CATEGORIES[type].forEach(cat => {
+  const hideZero = document.getElementById('hide-zero-budgets')?.checked;
+  const allCats = [...allCategoriesByType()[type]].sort((a, b) => a.localeCompare(b));
+  const catsToShow = hideZero ? allCats.filter(cat => budgets[cat] > 0) : allCats;
+  catsToShow.forEach(cat => {
     const val = budgets[cat] || '';
     const card = document.createElement('div');
     card.className = 'budget-category-card';
@@ -1535,6 +1752,16 @@ function saveBudgets() {
   showToast('Budget targets saved.','success');
 }
 
+let budgetViewMode = 'monthly';
+function setBudgetView(mode) {
+  budgetViewMode = mode;
+  const mBtn = document.getElementById('budget-view-monthly-btn');
+  const aBtn = document.getElementById('budget-view-annual-btn');
+  if (mBtn) { mBtn.classList.toggle('active-personal', mode === 'monthly'); }
+  if (aBtn) { aBtn.classList.toggle('active-personal', mode === 'annual'); }
+  renderMonthlyBudgetWidget('budget-monthly-detail');
+}
+
 function renderBudgetProgress() {
   const container = document.getElementById('budget-progress-detail');
   container.innerHTML = '';
@@ -1556,7 +1783,17 @@ function renderBudgetProgress() {
 
   container.innerHTML += `<div style="font-size:11px;color:var(--text2);margin-bottom:12px;">${fyPct}% of FY elapsed — use this to judge if you're on pace.</div>`;
 
-  const renderSection = (cats, actuals, isIncome) => cats.forEach(cat => {
+  const sortMode = document.getElementById('budget-progress-sort')?.value || 'default';
+  const sortCats = (cats, actuals) => {
+    const arr = [...cats];
+    if (sortMode === 'name') arr.sort((a, b) => a.localeCompare(b));
+    else if (sortMode === 'pct-desc') arr.sort((a, b) => { const ta=budgets[a]||0,tb=budgets[b]||0; return (tb>0?(actuals[b]||0)/tb:0)-(ta>0?(actuals[a]||0)/ta:0); });
+    else if (sortMode === 'pct-asc') arr.sort((a, b) => { const ta=budgets[a]||0,tb=budgets[b]||0; return (ta>0?(actuals[a]||0)/ta:0)-(tb>0?(actuals[b]||0)/tb:0); });
+    else if (sortMode === 'spent-desc') arr.sort((a, b) => (actuals[b]||0)-(actuals[a]||0));
+    else if (sortMode === 'overspend') arr.sort((a, b) => { const oa=(actuals[a]||0)-(budgets[a]||0),ob=(actuals[b]||0)-(budgets[b]||0); return ob-oa; });
+    return arr;
+  };
+  const renderSection = (cats, actuals, isIncome) => sortCats(cats, actuals).forEach(cat => {
     const target = budgets[cat] || 0;
     const actual = actuals[cat] || 0;
     const pct = target > 0 ? Math.min((actual/target)*100, 100) : 0;
@@ -2213,6 +2450,9 @@ function renderPendingTable() {
     const tr = document.createElement('tr');
     tr.className = 'pending-row';
     tr.innerHTML = `
+      <td style="width:32px;padding:8px;">
+        <input type="checkbox" class="import-select" data-idx="${i}" onchange="updateImportBulkBar()" style="cursor:pointer;accent-color:var(--accent);">
+      </td>
       <td>${fmtDate(t.date)}</td>
       <td>${esc(t.description)}</td>
       <td class="${t.type==='income'?'amount-income':'amount-expense'}">${t.type==='expense'?'-':''}${fmt(t.amount)}</td>
@@ -2232,10 +2472,60 @@ function renderPendingTable() {
       <td><button class="btn btn-danger btn-sm btn-icon" onclick="removePending(${i})">✕</button></td>`;
     tbody.appendChild(tr);
   });
+
+  // Populate bulk cat dropdown once
+  const importBulkCat = document.getElementById('import-bulk-cat-sel');
+  if (importBulkCat && importBulkCat.options.length <= 1) {
+    sortedCats().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; importBulkCat.appendChild(o); });
+  }
+  updateImportBulkBar();
 }
 
 function removePending(i) { pendingImport.splice(i,1); renderPendingTable(); }
 function clearPending() { pendingImport=[]; renderPendingTable(); }
+
+function getImportSelectedIdxs() {
+  return [...document.querySelectorAll('.import-select:checked')].map(cb => Number(cb.dataset.idx));
+}
+function updateImportBulkBar() {
+  const idxs = getImportSelectedIdxs();
+  const bar = document.getElementById('import-bulk-bar');
+  if (!bar) return;
+  bar.style.display = idxs.length > 0 ? 'flex' : 'none';
+  const lbl = document.getElementById('import-bulk-count-label');
+  if (lbl) lbl.textContent = `${idxs.length} selected`;
+  const all = document.querySelectorAll('.import-select');
+  const selAll = document.getElementById('select-all-import');
+  if (selAll) {
+    selAll.indeterminate = idxs.length > 0 && idxs.length < all.length;
+    selAll.checked = all.length > 0 && idxs.length === all.length;
+  }
+}
+function toggleSelectAllImport(checked) {
+  document.querySelectorAll('.import-select').forEach(cb => { cb.checked = checked; });
+  updateImportBulkBar();
+}
+function importBulkApply() {
+  const idxs = getImportSelectedIdxs();
+  if (idxs.length === 0) return;
+  const cat  = document.getElementById('import-bulk-cat-sel').value;
+  const type = document.getElementById('import-bulk-type-sel').value;
+  const bp   = document.getElementById('import-bulk-bp-sel').value;
+  if (!cat && !type && !bp) { showToast('Choose at least one field to apply.', 'error'); return; }
+  idxs.forEach(idx => {
+    const t = pendingImport[idx];
+    if (!t) return;
+    if (cat)  { t.category = cat; if (CAPITAL_CATS.has(cat)) t.type = 'expense'; }
+    if (type) t.type = type;
+    if (bp)   t.bp = bp;
+  });
+  renderPendingTable();
+  showToast(`Updated ${idxs.length} row${idxs.length > 1 ? 's' : ''}.`, 'success');
+}
+function clearImportBulkSelection() {
+  document.querySelectorAll('.import-select').forEach(cb => { cb.checked = false; });
+  updateImportBulkBar();
+}
 
 function confirmImport() {
   const today = new Date().toISOString().slice(0,10);
@@ -2560,6 +2850,32 @@ function renderIncomeBreakdown() {
 // ─── THIS MONTH BUDGET ───────────────────────────────────────────────────────
 
 function renderMonthlyBudgetWidget(containerId) {
+  if (containerId === 'budget-monthly-detail' && (typeof budgetViewMode !== 'undefined') && budgetViewMode === 'annual') {
+    const container2 = document.getElementById(containerId);
+    if (!container2) return;
+    const expActuals = {}, incActuals = {};
+    transactions.filter(t=>t.type==='expense').forEach(t=>{expActuals[t.category]=(expActuals[t.category]||0)+t.amount;});
+    transactions.filter(t=>t.type==='income').forEach(t=>{incActuals[t.category]=(incActuals[t.category]||0)+t.amount;});
+    const allCatsAnnual = [...allCategoriesByType().income.filter(c=>budgets[c]||incActuals[c]), ...allCategoriesByType().expense.filter(c=>budgets[c]||expActuals[c])];
+    if (allCatsAnnual.length === 0) { container2.innerHTML = '<p class="text-muted" style="font-size:13px;">Set budget targets to see annual progress.</p>'; return; }
+    container2.innerHTML = allCatsAnnual.map(cat => {
+      const actuals = CATEGORIES.income.includes(cat) ? incActuals : expActuals;
+      const actual = actuals[cat] || 0;
+      const target = budgets[cat] || 0;
+      const pct = target > 0 ? Math.min((actual/target)*100,100) : 0;
+      const isInc = CATEGORIES.income.includes(cat);
+      const fillClass = isInc ? (pct>=80?'progress-ok':'progress-warn') : (pct>=90?'progress-over':pct>=70?'progress-warn':'progress-ok');
+      return `<div class="progress-bar-wrap">
+        <div class="progress-label">
+          <span class="progress-label-name">${cat}</span>
+          <span class="progress-label-amounts">${fmt(actual)} / ${target?fmt(target):'No target'} ${target?'('+Math.round(pct)+'%)':''}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill ${fillClass}" style="width:${pct}%;"></div></div>
+      </div>`;
+    }).join('');
+    return;
+  }
+
   const now = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const label = now.toLocaleString('en-AU', { month: 'long', year: 'numeric' });
@@ -2691,7 +3007,18 @@ function renderTaxTransactions() {
       if (search && !`${t.description||''} ${t.category||''} ${t.company||''}`.toLowerCase().includes(search)) return false;
       return true;
     })
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .sort((a, b) => {
+      if (taxSortCol === 'amount') return (a.amount - b.amount) * taxSortDir;
+      const av = taxSortCol === 'bp' ? (a.bp || 'personal') : (a[taxSortCol] ?? '');
+      const bv = taxSortCol === 'bp' ? (b.bp || 'personal') : (b[taxSortCol] ?? '');
+      return String(av).localeCompare(String(bv)) * taxSortDir;
+    });
+
+  // Update sort arrows
+  ['date','description','category','type','amount','bp'].forEach(col => {
+    const el = document.getElementById('tax-sort-' + col);
+    if (el) el.textContent = taxSortCol === col ? (taxSortDir === 1 ? ' ▲' : ' ▼') : '';
+  });
 
   const tbody = document.getElementById('tax-all-txns');
   if (!tbody) return;
