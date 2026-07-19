@@ -2638,12 +2638,12 @@ function renderPendingTable() {
       <td>${esc(t.description)}</td>
       <td class="${t.type==='income'?'amount-income':'amount-expense'}">${t.type==='expense'?'-':''}${fmt(t.amount)}</td>
       <td>
-        <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].type=this.value;markPendingEdit(${i},'type',this.value)">
+        <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="markPendingEdit(${i},'type',this.value);pendingImport[${i}].type=this.value">
           <option value="income" ${t.type==='income'?'selected':''}>Income</option>
           <option value="expense" ${t.type==='expense'?'selected':''}>Expense</option>
         </select>
       </td>
-      <td><select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].category=this.value;markPendingEdit(${i},'category',this.value)">${catOptions}</select></td>
+      <td><select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="markPendingEdit(${i},'category',this.value);pendingImport[${i}].category=this.value">${catOptions}</select></td>
       <td>
         <select style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;" onchange="pendingImport[${i}].bp=this.value">
           <option value="personal" ${(t.bp||'personal')==='personal'?'selected':''}>Personal</option>
