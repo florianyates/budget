@@ -490,6 +490,9 @@
       <!-- Tax estimate -->
       <div class="card" id="tax-estimate-card" style="margin-bottom:24px;"></div>
 
+      <!-- ATO return deductions breakdown -->
+      <div class="card" id="ato-summary-card" style="margin-bottom:24px;"></div>
+
       <!-- Review & Tag all transactions -->
       <div class="card">
         <div class="section-header" style="margin-bottom:16px;">
@@ -1059,6 +1062,75 @@ const CAT_RULES = [
   [/gift|present|donation|charity|gofundme/i, 'Gifts & Donations', 'expense'],
   [/ato|tax|abn|invoice|business|client/i, 'Business Expenses', 'expense'],
   [/bunnings|hardware|home|ikea|harvey norm/i, 'Rent & Housing', 'expense'],
+];
+
+// Maps ATO myTax deduction fields → app categories (used for ATO summary table on Tax page)
+// Field names and rules per ATO myTax / Tax Return for Individuals
+const ATO_DEDUCTION_GROUPS = [
+  {
+    label: 'Work-related car expenses',
+    cats: ['Transport'],
+    bpFilter: 'business',
+    // D1: Fuel, oil, repairs, registration, insurance for work portion. Commuting to/from work is NOT deductible.
+    hint: 'Tag Transport transactions as Business when used for work travel (not commuting).',
+  },
+  {
+    label: 'Work-related travel expenses',
+    cats: ['Travel & Accommodation'],
+    bpFilter: 'business',
+    // D2: Overnight trips for work — flights, accommodation, meals while travelling. Also taxis/rideshare for work (not own car).
+    hint: 'Tag Travel & Accommodation as Business for work-related overnight trips and interstate/overseas travel.',
+  },
+  {
+    label: 'Work-related clothing, laundry and dry-cleaning expenses',
+    cats: ['Shopping & Clothing'],
+    bpFilter: 'business',
+    // D3: Protective, compulsory uniform, or occupation-specific clothing ONLY. Conventional clothing is NOT deductible even if worn for work.
+    hint: 'Tag Shopping & Clothing as Business only for uniforms, protective gear, or occupation-specific clothing.',
+  },
+  {
+    label: 'Work-related self-education expenses',
+    cats: ['Education & Training'],
+    bpFilter: 'business',
+    // D4: Courses, textbooks, travel to study — must be directly related to your current job (not for a new career).
+    hint: 'Add a custom "Education & Training" category and tag as Business for work-related courses and study costs.',
+  },
+  {
+    label: 'Other work-related expenses',
+    cats: '_other_biz',
+    bpFilter: 'business',
+    // D5: Phone/internet (work %), home office (WFH fixed rate or actual), union fees, tools, professional memberships, journals.
+    hint: 'All other business-tagged expenses — includes phone, subscriptions, WFH costs, tools, professional memberships.',
+  },
+  {
+    label: 'Interest income deductions',
+    cats: ['Interest Charges', 'Bank Fees'],
+    bpFilter: 'business',
+    // D6: Account-keeping fees and interest expenses incurred to earn interest income (e.g. fees on savings/investment accounts).
+    hint: 'Add custom "Interest Charges" or "Bank Fees" categories for costs of earning interest income.',
+  },
+  {
+    label: 'Dividend deductions',
+    cats: ['Investments'],
+    bpFilter: 'business',
+    // D7: Costs of earning dividend income — brokerage fees, management fees, investment service subscriptions, margin loan interest.
+    // Note: the share purchase price itself is NOT deductible here (it's a capital cost).
+    hint: 'Tag Investments as Business for brokerage fees, management fees, and margin loan interest — not share purchases.',
+  },
+  {
+    label: 'Gifts or donations',
+    cats: ['Gifts & Donations'],
+    bpFilter: null,
+    // D9: Gifts of $2+ to ATO-registered Deductible Gift Recipients (DGRs). Raffle tickets, fundraising items, or benefits received in return are NOT deductible.
+    hint: 'All Gifts & Donations shown — only donations to registered DGR organisations are deductible.',
+  },
+  {
+    label: 'Cost of managing tax affairs',
+    cats: ['Tax & Accounting'],
+    bpFilter: 'business',
+    // D10: Tax agent / accountant fees, ATO-interest charges, cost of tax software or guides.
+    hint: 'Add a custom "Tax & Accounting" category for accountant fees, tax agent fees, and tax preparation costs.',
+  },
 ];
 
 function autoCategorise(description, company='', amount=0) {
@@ -3137,6 +3209,7 @@ function renderTaxSummary() {
   renderTaxKPIs();
   if (hasTxns) renderTaxTransactions();
   renderTaxEstimate();
+  renderATOSummary();
 }
 
 function renderTaxKPIs() {
@@ -3285,6 +3358,7 @@ function saveTaxTxnField(idx, field, rawValue) {
     save('txns_' + taxFY, taxPageTxns);
   }
   renderTaxKPIs();
+  renderATOSummary();
 }
 
 function calcAUTax(taxableIncome) {
@@ -3323,6 +3397,86 @@ function renderTaxEstimate() {
     </div>
     <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);">
       ⚠ Estimate only. Does not account for HECS-HELP repayments, private health insurance rebate/surcharge, spouse/dependent offsets, or franking credits. Consult a registered tax agent for accurate figures.
+    </div>`;
+}
+
+function renderATOSummary() {
+  const el = document.getElementById('ato-summary-card');
+  if (!el) return;
+
+  const bizTxns = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business');
+
+  // Build the set of categories already claimed by a named ATO group
+  const specificCats = new Set();
+  ATO_DEDUCTION_GROUPS.forEach(g => {
+    if (g.cats && g.cats !== '_other_biz') g.cats.forEach(c => specificCats.add(c));
+  });
+
+  let totalDeductions = 0;
+
+  const rows = ATO_DEDUCTION_GROUPS.map(g => {
+    let matching;
+    if (g.cats === '_other_biz') {
+      matching = bizTxns.filter(t => !specificCats.has(t.category));
+    } else if (g.bpFilter === null) {
+      matching = taxPageTxns.filter(t => t.type === 'expense' && g.cats.includes(t.category));
+    } else {
+      matching = bizTxns.filter(t => g.cats.includes(t.category));
+    }
+
+    const amount = matching.reduce((s, t) => s + t.amount, 0);
+    totalDeductions += amount;
+    const hasData = amount > 0;
+
+    let sourceNote = '';
+    if (hasData && g.cats === '_other_biz') {
+      const usedCats = [...new Set(matching.map(t => t.category))].sort();
+      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:2px;">→ ${usedCats.join(', ')}</div>`;
+    } else if (hasData && g.cats !== '_other_biz') {
+      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:2px;">→ ${g.cats.join(', ')}</div>`;
+    } else {
+      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>`;
+    }
+
+    return `<tr>
+      <td style="font-size:13px;padding:10px 12px;">
+        <div style="font-weight:${hasData ? '600' : '400'};color:${hasData ? 'var(--text)' : 'var(--text2)'};">${g.label}</div>
+        ${sourceNote}
+      </td>
+      <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData ? 'var(--income-color)' : 'var(--text2)'};">${hasData ? fmt(amount) : '—'}</td>
+      <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData ? matching.length : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">ATO Tax Return — Deductions Breakdown</div>
+        <div style="font-size:12px;color:var(--text2);">Amounts to enter in your myTax / tax return for ${fmtFY(taxFY)}</div>
+      </div>
+      <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">total deductions</span></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>ATO Field</th>
+          <th style="text-align:right;width:110px;">Amount</th>
+          <th style="text-align:right;width:60px;">Txns</th>
+        </tr></thead>
+        <tbody>
+          ${rows}
+          <tr style="border-top:2px solid var(--border);">
+            <td style="font-weight:700;padding:10px 12px;">Total deductions</td>
+            <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:15px;color:var(--income-color);">${fmt(totalDeductions)}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.5;">
+      ⚠ Only expenses tagged as <strong>Business</strong> are counted (except Gifts &amp; Donations, which includes all transactions in that category).
+      Tag transactions in the table below, then this summary updates automatically.
+      Fields showing — need transactions categorised or a matching custom category added.
     </div>`;
 }
 
