@@ -3436,18 +3436,17 @@ function renderATOSummary() {
     const hasData = amount > 0;
     const isExpanded = atoExpanded.has(idx);
 
-    // Category breakdown
+    // Group transactions by category for expanded view
     const byCat = {};
     matching.forEach(t => {
-      if (!byCat[t.category]) byCat[t.category] = { amount: 0, count: 0 };
-      byCat[t.category].amount += t.amount;
-      byCat[t.category].count++;
+      if (!byCat[t.category]) byCat[t.category] = [];
+      byCat[t.category].push(t);
     });
-    const catBreakdown = Object.entries(byCat).sort((a, b) => b[1].amount - a[1].amount);
-    const multiCat = catBreakdown.length > 1;
+    const catGroups = Object.entries(byCat)
+      .sort((a, b) => b[1].reduce((s,t)=>s+t.amount,0) - a[1].reduce((s,t)=>s+t.amount,0));
 
     const chevron = hasData
-      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;transition:transform 0.15s;display:inline-block;transform:rotate(${isExpanded ? 90 : 0}deg);">▶</span>`
+      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;display:inline-block;transform:rotate(${isExpanded ? 90 : 0}deg);">▶</span>`
       : `<span style="display:inline-block;width:16px;"></span>`;
 
     const hintNote = !hasData
@@ -3469,15 +3468,28 @@ function renderATOSummary() {
     </tr>`;
 
     let subRows = '';
-    if (isExpanded && catBreakdown.length > 0) {
-      subRows = catBreakdown.map(([cat, { amount: a, count: c }]) => `
-        <tr style="background:var(--surface2);">
-          <td style="padding:7px 12px 7px 38px;font-size:13px;border-top:1px solid var(--border);">
-            ${esc(cat)}
-          </td>
-          <td style="text-align:right;padding:7px 12px;font-size:13px;font-weight:600;color:var(--income-color);border-top:1px solid var(--border);">${fmt(a)}</td>
-          <td style="text-align:right;padding:7px 12px;font-size:12px;color:var(--text2);border-top:1px solid var(--border);">${c}</td>
-        </tr>`).join('');
+    if (isExpanded && catGroups.length > 0) {
+      subRows = catGroups.map(([cat, txns]) => {
+        const catTotal = txns.reduce((s,t) => s+t.amount, 0);
+        // Category subtotal row
+        const catHeader = `<tr style="background:var(--surface2);">
+          <td style="padding:6px 12px 6px 34px;font-size:12px;font-weight:700;color:var(--text);border-top:1px solid var(--border);">${esc(cat)}</td>
+          <td style="text-align:right;padding:6px 12px;font-size:12px;font-weight:700;color:var(--income-color);border-top:1px solid var(--border);">${fmt(catTotal)}</td>
+          <td style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text2);border-top:1px solid var(--border);">${txns.length}</td>
+        </tr>`;
+        // Individual transaction rows under this category
+        const txnRows = txns
+          .slice().sort((a,b) => a.date.localeCompare(b.date))
+          .map(t => `<tr style="background:var(--surface2);">
+            <td style="padding:4px 12px 4px 52px;font-size:12px;border-top:1px solid var(--border);">
+              <span style="color:var(--text);">${esc(t.description || '—')}</span>${t.company ? `<span style="color:var(--text2);"> · ${esc(t.company)}</span>` : ''}
+              <span style="color:var(--text2);margin-left:8px;font-size:11px;">${fmtDate(t.date)}</span>
+            </td>
+            <td style="text-align:right;padding:4px 12px;font-size:12px;color:var(--income-color);border-top:1px solid var(--border);">${fmt(t.amount)}</td>
+            <td style="border-top:1px solid var(--border);"></td>
+          </tr>`).join('');
+        return catHeader + txnRows;
+      }).join('');
     }
 
     return headerRow + subRows;
