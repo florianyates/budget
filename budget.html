@@ -1065,16 +1065,72 @@ const CAT_RULES = [
 ];
 
 // Maps ATO myTax deduction fields → app categories (used for ATO summary table on Tax page)
+// Field names and rules per ATO myTax / Tax Return for Individuals
 const ATO_DEDUCTION_GROUPS = [
-  { label: 'Work-related car expenses',                       cats: ['Transport'],                        bpFilter: 'business', hint: 'Business-tagged Transport transactions' },
-  { label: 'Work-related travel expenses',                    cats: ['Travel & Accommodation'],           bpFilter: 'business', hint: 'Business-tagged Travel & Accommodation transactions' },
-  { label: 'Work-related clothing, laundry & dry-cleaning',   cats: ['Shopping & Clothing'],              bpFilter: 'business', hint: 'Business-tagged Shopping & Clothing transactions' },
-  { label: 'Work-related self-education expenses',            cats: ['Education & Training'],             bpFilter: 'business', hint: 'Add a custom "Education & Training" category to capture these' },
-  { label: 'Other work-related expenses',                     cats: '_other_biz',                        bpFilter: 'business', hint: 'All other business-tagged expenses (WFH, phone, subscriptions, tools…)' },
-  { label: 'Interest income deductions',                      cats: ['Interest Charges', 'Bank Fees'],   bpFilter: 'business', hint: 'Add custom "Interest Charges" or "Bank Fees" categories if applicable' },
-  { label: 'Dividend deductions',                             cats: ['Investments'],                      bpFilter: 'business', hint: 'Business-tagged Investments (e.g. brokerage fees)' },
-  { label: 'Gifts or donations',                              cats: ['Gifts & Donations'],               bpFilter: null,       hint: 'All Gifts & Donations (DGR donations are deductible regardless of tag)' },
-  { label: 'Cost of managing tax affairs',                    cats: ['Tax & Accounting'],                bpFilter: 'business', hint: 'Add a custom "Tax & Accounting" category for accountant/agent fees' },
+  {
+    label: 'Work-related car expenses',
+    cats: ['Transport'],
+    bpFilter: 'business',
+    // D1: Fuel, oil, repairs, registration, insurance for work portion. Commuting to/from work is NOT deductible.
+    hint: 'Tag Transport transactions as Business when used for work travel (not commuting).',
+  },
+  {
+    label: 'Work-related travel expenses',
+    cats: ['Travel & Accommodation'],
+    bpFilter: 'business',
+    // D2: Overnight trips for work — flights, accommodation, meals while travelling. Also taxis/rideshare for work (not own car).
+    hint: 'Tag Travel & Accommodation as Business for work-related overnight trips and interstate/overseas travel.',
+  },
+  {
+    label: 'Work-related clothing, laundry and dry-cleaning expenses',
+    cats: ['Shopping & Clothing'],
+    bpFilter: 'business',
+    // D3: Protective, compulsory uniform, or occupation-specific clothing ONLY. Conventional clothing is NOT deductible even if worn for work.
+    hint: 'Tag Shopping & Clothing as Business only for uniforms, protective gear, or occupation-specific clothing.',
+  },
+  {
+    label: 'Work-related self-education expenses',
+    cats: ['Education & Training'],
+    bpFilter: 'business',
+    // D4: Courses, textbooks, travel to study — must be directly related to your current job (not for a new career).
+    hint: 'Add a custom "Education & Training" category and tag as Business for work-related courses and study costs.',
+  },
+  {
+    label: 'Other work-related expenses',
+    cats: '_other_biz',
+    bpFilter: 'business',
+    // D5: Phone/internet (work %), home office (WFH fixed rate or actual), union fees, tools, professional memberships, journals.
+    hint: 'All other business-tagged expenses — includes phone, subscriptions, WFH costs, tools, professional memberships.',
+  },
+  {
+    label: 'Interest income deductions',
+    cats: ['Interest Charges', 'Bank Fees'],
+    bpFilter: 'business',
+    // D6: Account-keeping fees and interest expenses incurred to earn interest income (e.g. fees on savings/investment accounts).
+    hint: 'Add custom "Interest Charges" or "Bank Fees" categories for costs of earning interest income.',
+  },
+  {
+    label: 'Dividend deductions',
+    cats: ['Investments'],
+    bpFilter: 'business',
+    // D7: Costs of earning dividend income — brokerage fees, management fees, investment service subscriptions, margin loan interest.
+    // Note: the share purchase price itself is NOT deductible here (it's a capital cost).
+    hint: 'Tag Investments as Business for brokerage fees, management fees, and margin loan interest — not share purchases.',
+  },
+  {
+    label: 'Gifts or donations',
+    cats: ['Gifts & Donations'],
+    bpFilter: null,
+    // D9: Gifts of $2+ to ATO-registered Deductible Gift Recipients (DGRs). Raffle tickets, fundraising items, or benefits received in return are NOT deductible.
+    hint: 'All Gifts & Donations shown — only donations to registered DGR organisations are deductible.',
+  },
+  {
+    label: 'Cost of managing tax affairs',
+    cats: ['Tax & Accounting'],
+    bpFilter: 'business',
+    // D10: Tax agent / accountant fees, ATO-interest charges, cost of tax software or guides.
+    hint: 'Add a custom "Tax & Accounting" category for accountant fees, tax agent fees, and tax preparation costs.',
+  },
 ];
 
 function autoCategorise(description, company='', amount=0) {
