@@ -1133,19 +1133,39 @@ const ATO_DEDUCTION_GROUPS = [
   },
 ];
 
+// Built-in smart rules applied after user customRules but before generic CAT_RULES.
+// These auto-assign category, type, AND bp (business/personal).
+const DEFAULT_AUTO_RULES = [
+  // Rideshare for work (not Uber Eats)
+  { pattern: 'uber(?!\\s*eats)|didi(?!\\s*(food|deliver))', category: 'Transport', type: 'expense', bp: 'business', label: 'Rideshare – work meetings' },
+  // Parking (CPP, Wilsons, EasyPark, Citiplace etc.)
+  { pattern: 'cpp\\s|citiplace|easypark|easy\\s*park|wilson.*park|wilsonpark|convention centre.*park|secure.*park', category: 'Transport', type: 'expense', bp: 'business', label: 'Parking – work' },
+  // Phone & telco bills (business proportion set via % in Tax page)
+  { pattern: 'telstra|optus|vodafone|amaysim|belong mobile|boost mobile|aussie broadband|tpg|iinet|internode', category: 'Utilities & Phone', type: 'expense', bp: 'business', label: 'Phone / internet bill' },
+  // Microsoft subscriptions (business proportion set via % in Tax page)
+  { pattern: 'microsoft|office 365|microsoft 365|onedrive', category: 'Subscriptions', type: 'expense', bp: 'business', label: 'Microsoft subscription' },
+  // Apple – personal by default
+  { pattern: 'apple\\.com|itunes\\.com|apple subscription|apple one|app store', category: 'Subscriptions', type: 'expense', bp: 'personal', label: 'Apple subscription – personal' },
+];
+
 function autoCategorise(description, company='', amount=0) {
   const text = `${description} ${company}`.toLowerCase();
-  // User-defined rules take priority
+  // 1. User-defined rules take priority
   const customRules = load('customRules', []);
   for (const r of customRules) {
-    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type }; } catch {}
+    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type, bp: r.bp || null }; } catch {}
   }
+  // 2. Built-in smart rules (with bp)
+  for (const r of DEFAULT_AUTO_RULES) {
+    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type, bp: r.bp }; } catch {}
+  }
+  // 3. Generic category rules (no bp — defaults to personal)
   for (const [pattern, category, type] of CAT_RULES) {
     if (typeof pattern === 'string' ? text.includes(pattern) : pattern.test(text)) {
-      return { category, type };
+      return { category, type, bp: null };
     }
   }
-  return amount > 0 ? { category: 'Other Income', type: 'income' } : { category: 'Miscellaneous', type: 'expense' };
+  return amount > 0 ? { category: 'Other Income', type: 'income', bp: null } : { category: 'Miscellaneous', type: 'expense', bp: null };
 }
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
@@ -2345,8 +2365,8 @@ function parseIngCSV(text) {
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
     const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc,'',credit>0?amount:-amount);
-    results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
+    const ac = autoCategorise(desc,'',credit>0?amount:-amount);
+    results.push({ date:dateStr, description:desc, company:'', amount, type, category:ac.category, bp:ac.bp||'personal', notes:'' });
   }
   return results;
 }
@@ -2368,8 +2388,8 @@ function parseIngXLSX(rows) {
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
     const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc);
-    results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
+    const ac = autoCategorise(desc);
+    results.push({ date:dateStr, description:desc, company:'', amount, type, category:ac.category, bp:ac.bp||'personal', notes:'' });
   }
   return results;
 }
@@ -3400,6 +3420,36 @@ function renderTaxEstimate() {
     </div>`;
 }
 
+// ─── CATEGORY BUSINESS-USE PERCENTAGE ────────────────────────────────────────
+// Stores { 'Utilities & Phone': 70, 'Subscriptions': 50 } etc.
+function getCatBizPct(cat) {
+  return load('categoryBizPercent', {})[cat] ?? 100;
+}
+function setCatBizPct(cat, pct) {
+  const all = load('categoryBizPercent', {});
+  const n = Math.max(0, Math.min(100, parseInt(pct, 10) || 100));
+  if (n === 100) delete all[cat]; else all[cat] = n;
+  save('categoryBizPercent', all);
+  renderATOSummary();
+  renderTaxKPIs();
+}
+
+// Save a field on a transaction directly from the ATO breakdown view
+function saveATOTxnField(txnId, field, value) {
+  const idx = taxPageTxns.findIndex(t => t.id === txnId);
+  if (idx < 0) return;
+  taxPageTxns[idx][field] = value;
+  if (taxFY === CURRENT_FY) {
+    const li = transactions.findIndex(t => t.id === txnId);
+    if (li >= 0) transactions[li][field] = value;
+    save('txns_' + CURRENT_FY, transactions);
+  } else {
+    save('txns_' + taxFY, taxPageTxns);
+  }
+  renderATOSummary();
+  renderTaxKPIs();
+}
+
 let atoExpanded = new Set();
 
 function toggleATOGroup(idx) {
@@ -3414,10 +3464,13 @@ function renderATOSummary() {
 
   const bizTxns = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business');
 
+  // Each category maps to exactly one ATO group — specificCats prevents _other_biz double-dipping
   const specificCats = new Set();
   ATO_DEDUCTION_GROUPS.forEach(g => {
     if (g.cats && g.cats !== '_other_biz') g.cats.forEach(c => specificCats.add(c));
   });
+
+  const catOpts = sortedCats().map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join('');
 
   let totalDeductions = 0;
 
@@ -3431,63 +3484,87 @@ function renderATOSummary() {
       matching = bizTxns.filter(t => g.cats.includes(t.category));
     }
 
-    const amount = matching.reduce((s, t) => s + t.amount, 0);
-    totalDeductions += amount;
-    const hasData = amount > 0;
+    // Apply % business use per category to compute the claimable amount
+    const claimable = matching.reduce((s, t) => s + t.amount * getCatBizPct(t.category) / 100, 0);
+    const rawTotal  = matching.reduce((s, t) => s + t.amount, 0);
+    totalDeductions += claimable;
+    const hasData = rawTotal > 0;
     const isExpanded = atoExpanded.has(idx);
 
-    // Group transactions by category for expanded view
     const byCat = {};
-    matching.forEach(t => {
-      if (!byCat[t.category]) byCat[t.category] = [];
-      byCat[t.category].push(t);
-    });
+    matching.forEach(t => { if (!byCat[t.category]) byCat[t.category] = []; byCat[t.category].push(t); });
     const catGroups = Object.entries(byCat)
       .sort((a, b) => b[1].reduce((s,t)=>s+t.amount,0) - a[1].reduce((s,t)=>s+t.amount,0));
 
     const chevron = hasData
-      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;display:inline-block;transform:rotate(${isExpanded ? 90 : 0}deg);">▶</span>`
+      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;display:inline-block;transform:rotate(${isExpanded?90:0}deg);">▶</span>`
       : `<span style="display:inline-block;width:16px;"></span>`;
 
-    const hintNote = !hasData
-      ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>`
-      : '';
+    const hintNote = !hasData ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>` : '';
 
-    const headerRow = `<tr style="cursor:${hasData ? 'pointer' : 'default'};" onclick="${hasData ? `toggleATOGroup(${idx})` : ''}">
+    const headerRow = `<tr style="cursor:${hasData?'pointer':'default'};" onclick="${hasData?`toggleATOGroup(${idx})`:''}">
       <td style="font-size:13px;padding:10px 12px;">
         <div style="display:flex;align-items:center;">
           ${chevron}
           <div>
-            <span style="font-weight:${hasData ? '600' : '400'};color:${hasData ? 'var(--text)' : 'var(--text2)'};">${g.label}</span>
+            <span style="font-weight:${hasData?'600':'400'};color:${hasData?'var(--text)':'var(--text2)'};">${g.label}</span>
             ${hintNote}
           </div>
         </div>
       </td>
-      <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData ? 'var(--income-color)' : 'var(--text2)'};">${hasData ? fmt(amount) : '—'}</td>
-      <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData ? matching.length : '—'}</td>
+      <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData?'var(--income-color)':'var(--text2)'};">${hasData?fmt(claimable):'—'}</td>
+      <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData?matching.length:'—'}</td>
     </tr>`;
 
     let subRows = '';
     if (isExpanded && catGroups.length > 0) {
       subRows = catGroups.map(([cat, txns]) => {
-        const catTotal = txns.reduce((s,t) => s+t.amount, 0);
-        // Category subtotal row
+        const catRaw     = txns.reduce((s,t) => s+t.amount, 0);
+        const pct        = getCatBizPct(cat);
+        const catClaimed = catRaw * pct / 100;
+        const hasPct     = pct < 100;
+
+        // Category subtotal row with inline % business use editor
         const catHeader = `<tr style="background:var(--surface2);">
-          <td style="padding:6px 12px 6px 34px;font-size:12px;font-weight:700;color:var(--text);border-top:1px solid var(--border);">${esc(cat)}</td>
-          <td style="text-align:right;padding:6px 12px;font-size:12px;font-weight:700;color:var(--income-color);border-top:1px solid var(--border);">${fmt(catTotal)}</td>
-          <td style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text2);border-top:1px solid var(--border);">${txns.length}</td>
+          <td style="padding:7px 12px 7px 34px;font-size:12px;border-top:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <strong>${esc(cat)}</strong>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);" onclick="event.stopPropagation()">
+                Business use:
+                <input type="number" min="1" max="100" value="${pct}"
+                  style="width:48px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:11px;text-align:center;"
+                  onchange="setCatBizPct('${escAttr(cat)}',this.value)" onclick="event.stopPropagation()">%
+              </label>
+              ${hasPct ? `<span style="font-size:11px;color:var(--text2);">full: ${fmt(catRaw)}</span>` : ''}
+            </div>
+          </td>
+          <td style="text-align:right;padding:7px 12px;font-size:12px;font-weight:700;color:var(--income-color);border-top:1px solid var(--border);white-space:nowrap;">${fmt(catClaimed)}</td>
+          <td style="text-align:right;padding:7px 12px;font-size:11px;color:var(--text2);border-top:1px solid var(--border);">${txns.length}</td>
         </tr>`;
-        // Individual transaction rows under this category
-        const txnRows = txns
-          .slice().sort((a,b) => a.date.localeCompare(b.date))
-          .map(t => `<tr style="background:var(--surface2);">
-            <td style="padding:4px 12px 4px 52px;font-size:12px;border-top:1px solid var(--border);">
-              <span style="color:var(--text);">${esc(t.description || '—')}</span>${t.company ? `<span style="color:var(--text2);"> · ${esc(t.company)}</span>` : ''}
-              <span style="color:var(--text2);margin-left:8px;font-size:11px;">${fmtDate(t.date)}</span>
+
+        // Individual transactions — with inline category & bp dropdowns for reassignment
+        const txnRows = txns.slice().sort((a,b) => a.date.localeCompare(b.date)).map(t => {
+          const catSel = sortedCats().map(c =>
+            `<option value="${escAttr(c)}"${c===t.category?' selected':''}>${esc(c)}</option>`).join('');
+          return `<tr style="background:var(--surface2);">
+            <td style="padding:5px 12px 5px 52px;font-size:12px;border-top:1px solid var(--border);">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="color:var(--text);">${esc(t.description||'—')}${t.company?`<span style="color:var(--text2);"> · ${esc(t.company)}</span>`:''}</span>
+                <span style="color:var(--text2);font-size:11px;">${fmtDate(t.date)}</span>
+                <select style="font-size:11px;padding:2px 5px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);"
+                  onclick="event.stopPropagation()" onchange="saveATOTxnField('${escAttr(t.id)}','category',this.value)">${catSel}</select>
+                <select style="font-size:11px;padding:2px 5px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);"
+                  onclick="event.stopPropagation()" onchange="saveATOTxnField('${escAttr(t.id)}','bp',this.value)">
+                  <option value="personal"${(t.bp||'personal')==='personal'?' selected':''}>Personal</option>
+                  <option value="business"${t.bp==='business'?' selected':''}>Business</option>
+                </select>
+              </div>
             </td>
-            <td style="text-align:right;padding:4px 12px;font-size:12px;color:var(--income-color);border-top:1px solid var(--border);">${fmt(t.amount)}</td>
+            <td style="text-align:right;padding:5px 12px;font-size:12px;color:var(--income-color);border-top:1px solid var(--border);white-space:nowrap;">${fmt(t.amount)}</td>
             <td style="border-top:1px solid var(--border);"></td>
-          </tr>`).join('');
+          </tr>`;
+        }).join('');
+
         return catHeader + txnRows;
       }).join('');
     }
@@ -3499,30 +3576,30 @@ function renderATOSummary() {
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
       <div>
         <div class="card-title" style="margin-bottom:2px;">ATO Tax Return — Deductions Breakdown</div>
-        <div style="font-size:12px;color:var(--text2);">Amounts to enter in your myTax / tax return for ${fmtFY(taxFY)} · Click a row to expand by category</div>
+        <div style="font-size:12px;color:var(--text2);">Click a row to expand · Reassign category or tag inline · Set % business use per category</div>
       </div>
-      <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">total deductions</span></div>
+      <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">claimable deductions</span></div>
     </div>
     <div class="table-wrap">
       <table>
         <thead><tr>
           <th>ATO Field</th>
-          <th style="text-align:right;width:110px;">Amount</th>
-          <th style="text-align:right;width:60px;">Txns</th>
+          <th style="text-align:right;width:120px;">Claimable</th>
+          <th style="text-align:right;width:55px;">Txns</th>
         </tr></thead>
         <tbody>
           ${rows}
           <tr style="border-top:2px solid var(--border);">
-            <td style="font-weight:700;padding:10px 12px;">Total deductions</td>
+            <td style="font-weight:700;padding:10px 12px;">Total claimable deductions</td>
             <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:15px;color:var(--income-color);">${fmt(totalDeductions)}</td>
             <td></td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.5;">
-      ⚠ Only expenses tagged as <strong>Business</strong> are counted (except Gifts &amp; Donations, which includes all transactions in that category).
-      Tag transactions in the table below, then this summary updates automatically.
+    <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.6;">
+      ⚠ <strong>Business-tagged expenses only</strong> (except Gifts &amp; Donations). Each transaction appears in exactly one ATO field.
+      Use the inline dropdowns to reassign category or business/personal tag. Set <em>Business use %</em> for mixed-use expenses like phone or internet.
     </div>`;
 }
 
