@@ -3400,13 +3400,20 @@ function renderTaxEstimate() {
     </div>`;
 }
 
+let atoExpanded = new Set();
+
+function toggleATOGroup(idx) {
+  if (atoExpanded.has(idx)) atoExpanded.delete(idx);
+  else atoExpanded.add(idx);
+  renderATOSummary();
+}
+
 function renderATOSummary() {
   const el = document.getElementById('ato-summary-card');
   if (!el) return;
 
   const bizTxns = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business');
 
-  // Build the set of categories already claimed by a named ATO group
   const specificCats = new Set();
   ATO_DEDUCTION_GROUPS.forEach(g => {
     if (g.cats && g.cats !== '_other_biz') g.cats.forEach(c => specificCats.add(c));
@@ -3414,7 +3421,7 @@ function renderATOSummary() {
 
   let totalDeductions = 0;
 
-  const rows = ATO_DEDUCTION_GROUPS.map(g => {
+  const rows = ATO_DEDUCTION_GROUPS.map((g, idx) => {
     let matching;
     if (g.cats === '_other_biz') {
       matching = bizTxns.filter(t => !specificCats.has(t.category));
@@ -3427,32 +3434,60 @@ function renderATOSummary() {
     const amount = matching.reduce((s, t) => s + t.amount, 0);
     totalDeductions += amount;
     const hasData = amount > 0;
+    const isExpanded = atoExpanded.has(idx);
 
-    let sourceNote = '';
-    if (hasData && g.cats === '_other_biz') {
-      const usedCats = [...new Set(matching.map(t => t.category))].sort();
-      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:2px;">→ ${usedCats.join(', ')}</div>`;
-    } else if (hasData && g.cats !== '_other_biz') {
-      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:2px;">→ ${g.cats.join(', ')}</div>`;
-    } else {
-      sourceNote = `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>`;
-    }
+    // Category breakdown
+    const byCat = {};
+    matching.forEach(t => {
+      if (!byCat[t.category]) byCat[t.category] = { amount: 0, count: 0 };
+      byCat[t.category].amount += t.amount;
+      byCat[t.category].count++;
+    });
+    const catBreakdown = Object.entries(byCat).sort((a, b) => b[1].amount - a[1].amount);
+    const multiCat = catBreakdown.length > 1;
 
-    return `<tr>
+    const chevron = hasData
+      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;transition:transform 0.15s;display:inline-block;transform:rotate(${isExpanded ? 90 : 0}deg);">▶</span>`
+      : `<span style="display:inline-block;width:16px;"></span>`;
+
+    const hintNote = !hasData
+      ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>`
+      : '';
+
+    const headerRow = `<tr style="cursor:${hasData ? 'pointer' : 'default'};" onclick="${hasData ? `toggleATOGroup(${idx})` : ''}">
       <td style="font-size:13px;padding:10px 12px;">
-        <div style="font-weight:${hasData ? '600' : '400'};color:${hasData ? 'var(--text)' : 'var(--text2)'};">${g.label}</div>
-        ${sourceNote}
+        <div style="display:flex;align-items:center;">
+          ${chevron}
+          <div>
+            <span style="font-weight:${hasData ? '600' : '400'};color:${hasData ? 'var(--text)' : 'var(--text2)'};">${g.label}</span>
+            ${hintNote}
+          </div>
+        </div>
       </td>
       <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData ? 'var(--income-color)' : 'var(--text2)'};">${hasData ? fmt(amount) : '—'}</td>
       <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData ? matching.length : '—'}</td>
     </tr>`;
+
+    let subRows = '';
+    if (isExpanded && catBreakdown.length > 0) {
+      subRows = catBreakdown.map(([cat, { amount: a, count: c }]) => `
+        <tr style="background:var(--surface2);">
+          <td style="padding:7px 12px 7px 38px;font-size:13px;border-top:1px solid var(--border);">
+            ${esc(cat)}
+          </td>
+          <td style="text-align:right;padding:7px 12px;font-size:13px;font-weight:600;color:var(--income-color);border-top:1px solid var(--border);">${fmt(a)}</td>
+          <td style="text-align:right;padding:7px 12px;font-size:12px;color:var(--text2);border-top:1px solid var(--border);">${c}</td>
+        </tr>`).join('');
+    }
+
+    return headerRow + subRows;
   }).join('');
 
   el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
       <div>
         <div class="card-title" style="margin-bottom:2px;">ATO Tax Return — Deductions Breakdown</div>
-        <div style="font-size:12px;color:var(--text2);">Amounts to enter in your myTax / tax return for ${fmtFY(taxFY)}</div>
+        <div style="font-size:12px;color:var(--text2);">Amounts to enter in your myTax / tax return for ${fmtFY(taxFY)} · Click a row to expand by category</div>
       </div>
       <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">total deductions</span></div>
     </div>
@@ -3476,7 +3511,6 @@ function renderATOSummary() {
     <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.5;">
       ⚠ Only expenses tagged as <strong>Business</strong> are counted (except Gifts &amp; Donations, which includes all transactions in that category).
       Tag transactions in the table below, then this summary updates automatically.
-      Fields showing — need transactions categorised or a matching custom category added.
     </div>`;
 }
 
