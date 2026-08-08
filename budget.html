@@ -184,6 +184,9 @@
   .budget-input-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .budget-input-row label { font-size: 12px; color: var(--text2); width: 60px; flex-shrink: 0; }
   .budget-input-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .budget-prev-ref { font-size: 11px; color: var(--text2); margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .btn-use-prev { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); cursor: pointer; white-space: nowrap; }
+  .btn-use-prev:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   /* Projection cards */
   .proj-card { text-align: center; }
@@ -1821,8 +1824,28 @@ function renderBudgetInputs(containerId, type) {
   const hideZero = document.getElementById('hide-zero-budgets')?.checked;
   const allCats = [...allCategoriesByType()[type]].sort((a, b) => a.localeCompare(b));
   const catsToShow = hideZero ? allCats.filter(cat => budgets[cat] > 0) : allCats;
+
+  // Previous FY actuals for reference — prefer raw transactions, fall back to history summary
+  const prevFY = String(parseInt(CURRENT_FY) - 101);
+  const prevRaw = load('txns_' + prevFY, []);
+  const prevCatTotals = {};
+  if (prevRaw.length > 0) {
+    prevRaw.filter(t => t.type === type).forEach(t => {
+      prevCatTotals[t.category] = (prevCatTotals[t.category] || 0) + t.amount;
+    });
+  } else if (type === 'expense') {
+    Object.assign(prevCatTotals, historicalData[prevFY]?.categories || {});
+  }
+  const hasPrevData = Object.keys(prevCatTotals).length > 0;
+
   catsToShow.forEach(cat => {
     const val = budgets[cat] || '';
+    const prevAmt = prevCatTotals[cat];
+    const prevRef = hasPrevData ? `
+      <div class="budget-prev-ref">
+        <span>${fmtFY(prevFY)} actual: <strong>${prevAmt > 0 ? fmt(prevAmt) : '—'}</strong></span>
+        ${prevAmt > 0 ? `<button class="btn-use-prev" onclick="usePrevBudget('${cat}',${Math.round(prevAmt)})">Use</button>` : ''}
+      </div>` : '';
     const card = document.createElement('div');
     card.className = 'budget-category-card';
     card.innerHTML = `
@@ -1834,9 +1857,17 @@ function renderBudgetInputs(containerId, type) {
       <div class="budget-input-row">
         <label>Monthly</label>
         <input type="number" step="10" min="0" value="${val?Math.round(val/12):''}" id="budget-monthly-${catId(cat)}" placeholder="0" onchange="updateBudgetAnnual('${cat}')">
-      </div>`;
+      </div>${prevRef}`;
     container.appendChild(card);
   });
+}
+
+function usePrevBudget(cat, amt) {
+  const aEl = document.getElementById('budget-' + catId(cat));
+  const mEl = document.getElementById('budget-monthly-' + catId(cat));
+  if (aEl) aEl.value = amt;
+  if (mEl) mEl.value = Math.round(amt / 12);
+  saveBudgets();
 }
 
 function updateBudgetMonthly(cat) {
