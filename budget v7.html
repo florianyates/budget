@@ -184,6 +184,9 @@
   .budget-input-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
   .budget-input-row label { font-size: 12px; color: var(--text2); width: 60px; flex-shrink: 0; }
   .budget-input-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .budget-prev-ref { font-size: 11px; color: var(--text2); margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .btn-use-prev { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); cursor: pointer; white-space: nowrap; }
+  .btn-use-prev:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   /* Projection cards */
   .proj-card { text-align: center; }
@@ -312,7 +315,7 @@
         <div class="card">
           <div class="card-title">Savings Rate</div>
           <div class="stat-value text-savings" id="kpi-rate">0%</div>
-          <div class="stat-sub">% of income saved</div>
+          <div class="stat-sub" id="kpi-rate-sub">% of total income</div>
         </div>
       </div>
 
@@ -1133,19 +1136,39 @@ const ATO_DEDUCTION_GROUPS = [
   },
 ];
 
+// Built-in smart rules applied after user customRules but before generic CAT_RULES.
+// These auto-assign category, type, AND bp (business/personal).
+const DEFAULT_AUTO_RULES = [
+  // Rideshare for work (not Uber Eats)
+  { pattern: 'uber(?!\\s*eats)|didi(?!\\s*(food|deliver))', category: 'Transport', type: 'expense', bp: 'business', label: 'Rideshare – work meetings' },
+  // Parking (CPP, Wilsons, EasyPark, Citiplace etc.)
+  { pattern: 'cpp\\s|citiplace|easypark|easy\\s*park|wilson.*park|wilsonpark|convention centre.*park|secure.*park', category: 'Transport', type: 'expense', bp: 'business', label: 'Parking – work' },
+  // Phone & telco bills (business proportion set via % in Tax page)
+  { pattern: 'telstra|optus|vodafone|amaysim|belong mobile|boost mobile|aussie broadband|tpg|iinet|internode', category: 'Utilities & Phone', type: 'expense', bp: 'business', label: 'Phone / internet bill' },
+  // Microsoft subscriptions (business proportion set via % in Tax page)
+  { pattern: 'microsoft|office 365|microsoft 365|onedrive', category: 'Subscriptions', type: 'expense', bp: 'business', label: 'Microsoft subscription' },
+  // Apple – personal by default
+  { pattern: 'apple\\.com|itunes\\.com|apple subscription|apple one|app store', category: 'Subscriptions', type: 'expense', bp: 'personal', label: 'Apple subscription – personal' },
+];
+
 function autoCategorise(description, company='', amount=0) {
   const text = `${description} ${company}`.toLowerCase();
-  // User-defined rules take priority
+  // 1. User-defined rules take priority
   const customRules = load('customRules', []);
   for (const r of customRules) {
-    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type }; } catch {}
+    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type, bp: r.bp || null }; } catch {}
   }
+  // 2. Built-in smart rules (with bp)
+  for (const r of DEFAULT_AUTO_RULES) {
+    try { if (new RegExp(r.pattern, 'i').test(text)) return { category: r.category, type: r.type, bp: r.bp }; } catch {}
+  }
+  // 3. Generic category rules (no bp — defaults to personal)
   for (const [pattern, category, type] of CAT_RULES) {
     if (typeof pattern === 'string' ? text.includes(pattern) : pattern.test(text)) {
-      return { category, type };
+      return { category, type, bp: null };
     }
   }
-  return amount > 0 ? { category: 'Other Income', type: 'income' } : { category: 'Miscellaneous', type: 'expense' };
+  return amount > 0 ? { category: 'Other Income', type: 'income', bp: null } : { category: 'Miscellaneous', type: 'expense', bp: null };
 }
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
@@ -1801,8 +1824,28 @@ function renderBudgetInputs(containerId, type) {
   const hideZero = document.getElementById('hide-zero-budgets')?.checked;
   const allCats = [...allCategoriesByType()[type]].sort((a, b) => a.localeCompare(b));
   const catsToShow = hideZero ? allCats.filter(cat => budgets[cat] > 0) : allCats;
+
+  // Previous FY actuals for reference — prefer raw transactions, fall back to history summary
+  const prevFY = String(parseInt(CURRENT_FY) - 101);
+  const prevRaw = load('txns_' + prevFY, []);
+  const prevCatTotals = {};
+  if (prevRaw.length > 0) {
+    prevRaw.filter(t => t.type === type).forEach(t => {
+      prevCatTotals[t.category] = (prevCatTotals[t.category] || 0) + t.amount;
+    });
+  } else if (type === 'expense') {
+    Object.assign(prevCatTotals, historicalData[prevFY]?.categories || {});
+  }
+  const hasPrevData = Object.keys(prevCatTotals).length > 0;
+
   catsToShow.forEach(cat => {
     const val = budgets[cat] || '';
+    const prevAmt = prevCatTotals[cat];
+    const prevRef = hasPrevData ? `
+      <div class="budget-prev-ref">
+        <span>${fmtFY(prevFY)} actual: <strong>${prevAmt > 0 ? fmt(prevAmt) : '—'}</strong></span>
+        ${prevAmt > 0 ? `<button class="btn-use-prev" onclick="usePrevBudget('${cat}',${Math.round(prevAmt)})">Use</button>` : ''}
+      </div>` : '';
     const card = document.createElement('div');
     card.className = 'budget-category-card';
     card.innerHTML = `
@@ -1814,9 +1857,17 @@ function renderBudgetInputs(containerId, type) {
       <div class="budget-input-row">
         <label>Monthly</label>
         <input type="number" step="10" min="0" value="${val?Math.round(val/12):''}" id="budget-monthly-${catId(cat)}" placeholder="0" onchange="updateBudgetAnnual('${cat}')">
-      </div>`;
+      </div>${prevRef}`;
     container.appendChild(card);
   });
+}
+
+function usePrevBudget(cat, amt) {
+  const aEl = document.getElementById('budget-' + catId(cat));
+  const mEl = document.getElementById('budget-monthly-' + catId(cat));
+  if (aEl) aEl.value = amt;
+  if (mEl) mEl.value = Math.round(amt / 12);
+  saveBudgets();
 }
 
 function updateBudgetMonthly(cat) {
@@ -1921,14 +1972,19 @@ function renderBudgetProgress() {
 
 // Capital movement categories — excluded from "true expenses" in KPIs
 const CAPITAL_CATS = new Set(['Investments', 'Savings Transfer']);
+// Income categories treated as irregular reimbursements — shown in total income but excluded from
+// savings rate and projected-income calculations (so projections reflect only reliable recurring income).
+const REIMB_INCOME_CATS = new Set(['Miscellaneous']);
 
 function renderDashboard() {
   const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const reimbursements = transactions.filter(t=>t.type==='income'&&REIMB_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const coreIncome = income - reimbursements; // Salary, Dividends, Interest — reliable recurring income
   const allExpenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const capital = transactions.filter(t=>t.type==='expense'&&CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const expenses = allExpenses - capital; // true living expenses
-  const net = income - allExpenses; // actual money saved/invested
-  const rate = income > 0 ? (net/income*100) : 0;
+  const net = income - allExpenses; // actual money saved/invested (uses all income incl. reimbursements)
+  const rate = coreIncome > 0 ? (net/coreIncome*100) : 0; // rate vs recurring income only
 
   document.getElementById('kpi-income').textContent = fmt(income);
   document.getElementById('kpi-expenses').textContent = fmt(expenses);
@@ -1938,13 +1994,16 @@ function renderDashboard() {
   document.getElementById('kpi-savings-sub').textContent = capital > 0 ? `Incl. ${fmt(capital)} invested` : 'Income minus all expenses';
   document.getElementById('kpi-rate').textContent = rate.toFixed(1) + '%';
   document.getElementById('kpi-rate').style.color = rate >= 20 ? 'var(--income-color)' : rate >= 10 ? 'var(--warning)' : 'var(--expense-color)';
+  // Show reimbursement caveat on savings rate card if relevant
+  const rateSubEl = document.getElementById('kpi-rate-sub');
+  if (rateSubEl) rateSubEl.textContent = reimbursements > 0 ? `vs recurring income (excl. ${fmt(reimbursements)} reimbursements)` : 'of total income';
 
-  // Projections
+  // Projections — based on core income only (no reimbursements — they're one-offs)
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, (today - FY_START) / 86400000);
   const pctDone = Math.min(daysDone / fyDays, 1);
-  const projIncome = pctDone > 0 ? income / pctDone : 0;
+  const projIncome = pctDone > 0 ? coreIncome / pctDone : 0;
   const projExpenses = pctDone > 0 ? expenses / pctDone : 0;
   const projSavings = projIncome - projExpenses;
   document.getElementById('proj-income').textContent = fmt(projIncome);
@@ -2067,8 +2126,9 @@ function renderNextYearPredictions() {
   const pctDone = daysDone / fyDays;
 
   // Base monthly averages from 26/27 (annualised then ÷12)
+  // Exclude REIMB_INCOME_CATS (e.g. Miscellaneous) — reimbursements are one-offs, not recurring
   const incomeBycat = {};
-  transactions.filter(t => t.type === 'income').forEach(t => {
+  transactions.filter(t => t.type === 'income' && !REIMB_INCOME_CATS.has(t.category)).forEach(t => {
     incomeBycat[t.category] = (incomeBycat[t.category] || 0) + t.amount;
   });
   Object.keys(incomeBycat).forEach(c => { incomeBycat[c] = incomeBycat[c] / pctDone / 12; });
@@ -2108,9 +2168,11 @@ function renderNextYearPredictions() {
   const totalNet      = totalIncome - totalExpenses;
   const totalRate     = totalIncome > 0 ? (totalNet / totalIncome * 100) : 0;
 
-  // Current year annualised (for delta labels)
+  // Current year annualised (for delta labels) — income already excludes reimbursements
   const currIncome   = Object.values(incomeBycat).reduce((s, v) => s + v, 0) * 12;
+  const currCapital  = ((expBycat['Investments']||0) + (expBycat['Savings Transfer']||0)) * 12;
   const currExpenses = Object.values(expBycat).reduce((s, v) => s + v, 0) * 12;
+  const currLiving   = currExpenses - currCapital;
   const currNet      = currIncome - currExpenses;
   const currRate     = currIncome > 0 ? (currNet / currIncome * 100) : 0;
 
@@ -2125,7 +2187,7 @@ function renderNextYearPredictions() {
   document.getElementById('pred-income').textContent = fmt(totalIncome);
   document.getElementById('pred-income-delta').innerHTML = delta(totalIncome, currIncome);
   document.getElementById('pred-expenses').textContent = fmt(totalLiving);
-  document.getElementById('pred-expenses-delta').innerHTML = delta(totalExpenses, currExpenses, true);
+  document.getElementById('pred-expenses-delta').innerHTML = delta(totalLiving, currLiving, true);
   const savEl = document.getElementById('pred-savings');
   savEl.textContent = fmtSigned(totalNet);
   savEl.style.color = totalNet >= 0 ? 'var(--income-color)' : 'var(--expense-color)';
@@ -2345,8 +2407,8 @@ function parseIngCSV(text) {
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
     const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc,'',credit>0?amount:-amount);
-    results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
+    const ac = autoCategorise(desc,'',credit>0?amount:-amount);
+    results.push({ date:dateStr, description:desc, company:'', amount, type, category:ac.category, bp:ac.bp||'personal', notes:'' });
   }
   return results;
 }
@@ -2368,8 +2430,8 @@ function parseIngXLSX(rows) {
     const amount = credit > 0 ? credit : debit;
     if (amount <= 0) continue;
     const type = credit > 0 ? 'income' : 'expense';
-    const { category } = autoCategorise(desc);
-    results.push({ date:dateStr, description:desc, company:'', amount, type, category, bp:'personal', notes:'' });
+    const ac = autoCategorise(desc);
+    results.push({ date:dateStr, description:desc, company:'', amount, type, category:ac.category, bp:ac.bp||'personal', notes:'' });
   }
   return results;
 }
@@ -2876,45 +2938,6 @@ function escAttr(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&
 
 // ─── BACKUP / RESTORE ────────────────────────────────────────────────────────
 
-// ─── SAVINGS GOAL ────────────────────────────────────────────────────────────
-
-function saveSavingsGoal() {
-  const val = parseFloat(document.getElementById('savings-goal-input').value) || 0;
-  save('savingsGoal', val);
-  renderSavingsGoal();
-}
-
-function renderSavingsGoal() {
-  const goal = load('savingsGoal', 0);
-  const input = document.getElementById('savings-goal-input');
-  if (input && !input.value && goal) input.value = goal;
-
-  const net = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)
-            - transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-
-  const bar = document.getElementById('savings-goal-bar');
-  if (!bar) return;
-  if (!goal) {
-    bar.innerHTML = '<p style="font-size:13px;color:var(--text2);">Set a savings target above to track your progress.</p>';
-    return;
-  }
-  const pct = Math.min((net / goal) * 100, 100);
-  const over = net > goal;
-  const fillColor = over ? 'var(--income-color)' : pct >= 70 ? 'var(--warning)' : 'var(--accent)';
-  bar.innerHTML = `
-    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;">
-      <span style="color:var(--text2);">Saved so far: <strong style="color:var(--text);">${fmt(net)}</strong></span>
-      <span style="color:var(--text2);">Goal: <strong style="color:var(--text);">${fmt(goal)}</strong></span>
-    </div>
-    <div class="progress-track" style="height:10px;margin-bottom:8px;">
-      <div class="progress-fill" style="width:${pct}%;background:${fillColor};height:100%;border-radius:5px;transition:width 0.5s ease;"></div>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);">
-      <span style="color:${fillColor};font-weight:700;">${pct.toFixed(1)}% of goal reached</span>
-      <span>${over ? fmt(net - goal) + ' over goal' : fmt(goal - net) + ' to go'}</span>
-    </div>`;
-}
-
 // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
 
 const GOAL_COLORS = ['#6c63ff','#00d4aa','#ffd93d','#ff9f43','#4ecdc4','#a29bfe','#fd79a8','#00b894'];
@@ -3218,7 +3241,8 @@ function renderTaxKPIs() {
   const persExp = taxPageTxns.filter(t => t.type === 'expense' && t.bp !== 'business');
 
   const totalIncome   = income.reduce((s, t) => s + t.amount, 0);
-  const totalBiz      = bizExp.reduce((s, t) => s + t.amount, 0);
+  const totalBizRaw   = bizExp.reduce((s, t) => s + t.amount, 0);
+  const totalBiz      = bizExp.reduce((s, t) => s + t.amount * getCatBizPct(t.category) / 100, 0);
   const totalPersonal = persExp.reduce((s, t) => s + t.amount, 0);
   const taxable       = totalIncome - totalBiz;
 
@@ -3227,16 +3251,23 @@ function renderTaxKPIs() {
   document.getElementById('tax-personal-total').textContent = fmt(totalPersonal);
   document.getElementById('tax-taxable').textContent        = fmt(Math.max(0, taxable));
 
-  // Business by category
-  const bizByCat = {}, bizCount = {};
+  // Business by category — show claimable (adjusted) amount
+  const bizByCatRaw = {}, bizByCat = {}, bizCount = {};
   bizExp.forEach(t => {
-    bizByCat[t.category] = (bizByCat[t.category] || 0) + t.amount;
-    bizCount[t.category] = (bizCount[t.category] || 0) + 1;
+    const pct = getCatBizPct(t.category) / 100;
+    bizByCatRaw[t.category] = (bizByCatRaw[t.category] || 0) + t.amount;
+    bizByCat[t.category]    = (bizByCat[t.category]    || 0) + t.amount * pct;
+    bizCount[t.category]    = (bizCount[t.category]    || 0) + 1;
   });
   const bizRows = Object.entries(bizByCat).sort((a, b) => b[1] - a[1]);
   document.getElementById('tax-biz-breakdown').innerHTML = bizRows.length
-    ? bizRows.map(([c, a]) => `<tr><td>${c}</td><td style="text-align:right;color:var(--expense-color);font-weight:600;">${fmt(a)}</td><td style="text-align:right;color:var(--text2);">${bizCount[c]}</td></tr>`).join('')
-      + `<tr style="border-top:2px solid var(--border);"><td style="font-weight:700;">Total</td><td style="text-align:right;font-weight:700;color:var(--expense-color);">${fmt(totalBiz)}</td><td></td></tr>`
+    ? bizRows.map(([c, a]) => {
+        const raw = bizByCatRaw[c];
+        const pct = getCatBizPct(c);
+        const adjNote = pct < 100 ? ` <span style="color:var(--text2);font-size:11px;">(${pct}% of ${fmt(raw)})</span>` : '';
+        return `<tr><td>${c}${adjNote}</td><td style="text-align:right;color:var(--expense-color);font-weight:600;">${fmt(a)}</td><td style="text-align:right;color:var(--text2);">${bizCount[c]}</td></tr>`;
+      }).join('')
+      + `<tr style="border-top:2px solid var(--border);"><td style="font-weight:700;">Total claimable</td><td style="text-align:right;font-weight:700;color:var(--expense-color);">${fmt(totalBiz)}</td><td></td></tr>`
     : '<tr><td colspan="3" style="color:var(--text2);padding:20px;text-align:center;">No business expenses tagged yet</td></tr>';
 
   // Income by source
@@ -3400,6 +3431,36 @@ function renderTaxEstimate() {
     </div>`;
 }
 
+// ─── CATEGORY BUSINESS-USE PERCENTAGE ────────────────────────────────────────
+// Stores { 'Utilities & Phone': 70, 'Subscriptions': 50 } etc.
+function getCatBizPct(cat) {
+  return load('categoryBizPercent', {})[cat] ?? 100;
+}
+function setCatBizPct(cat, pct) {
+  const all = load('categoryBizPercent', {});
+  const n = Math.max(0, Math.min(100, parseInt(pct, 10) || 100));
+  if (n === 100) delete all[cat]; else all[cat] = n;
+  save('categoryBizPercent', all);
+  renderATOSummary();
+  renderTaxKPIs();
+}
+
+// Save a field on a transaction directly from the ATO breakdown view
+function saveATOTxnField(txnId, field, value) {
+  const idx = taxPageTxns.findIndex(t => t.id === txnId);
+  if (idx < 0) return;
+  taxPageTxns[idx][field] = value;
+  if (taxFY === CURRENT_FY) {
+    const li = transactions.findIndex(t => t.id === txnId);
+    if (li >= 0) transactions[li][field] = value;
+    save('txns_' + CURRENT_FY, transactions);
+  } else {
+    save('txns_' + taxFY, taxPageTxns);
+  }
+  renderATOSummary();
+  renderTaxKPIs();
+}
+
 let atoExpanded = new Set();
 
 function toggleATOGroup(idx) {
@@ -3414,10 +3475,13 @@ function renderATOSummary() {
 
   const bizTxns = taxPageTxns.filter(t => t.type === 'expense' && t.bp === 'business');
 
+  // Each category maps to exactly one ATO group — specificCats prevents _other_biz double-dipping
   const specificCats = new Set();
   ATO_DEDUCTION_GROUPS.forEach(g => {
     if (g.cats && g.cats !== '_other_biz') g.cats.forEach(c => specificCats.add(c));
   });
+
+  const catOpts = sortedCats().map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join('');
 
   let totalDeductions = 0;
 
@@ -3431,63 +3495,87 @@ function renderATOSummary() {
       matching = bizTxns.filter(t => g.cats.includes(t.category));
     }
 
-    const amount = matching.reduce((s, t) => s + t.amount, 0);
-    totalDeductions += amount;
-    const hasData = amount > 0;
+    // Apply % business use per category to compute the claimable amount
+    const claimable = matching.reduce((s, t) => s + t.amount * getCatBizPct(t.category) / 100, 0);
+    const rawTotal  = matching.reduce((s, t) => s + t.amount, 0);
+    totalDeductions += claimable;
+    const hasData = rawTotal > 0;
     const isExpanded = atoExpanded.has(idx);
 
-    // Group transactions by category for expanded view
     const byCat = {};
-    matching.forEach(t => {
-      if (!byCat[t.category]) byCat[t.category] = [];
-      byCat[t.category].push(t);
-    });
+    matching.forEach(t => { if (!byCat[t.category]) byCat[t.category] = []; byCat[t.category].push(t); });
     const catGroups = Object.entries(byCat)
       .sort((a, b) => b[1].reduce((s,t)=>s+t.amount,0) - a[1].reduce((s,t)=>s+t.amount,0));
 
     const chevron = hasData
-      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;display:inline-block;transform:rotate(${isExpanded ? 90 : 0}deg);">▶</span>`
+      ? `<span style="font-size:10px;color:var(--text2);margin-right:6px;display:inline-block;transform:rotate(${isExpanded?90:0}deg);">▶</span>`
       : `<span style="display:inline-block;width:16px;"></span>`;
 
-    const hintNote = !hasData
-      ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>`
-      : '';
+    const hintNote = !hasData ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;">ℹ ${g.hint}</div>` : '';
 
-    const headerRow = `<tr style="cursor:${hasData ? 'pointer' : 'default'};" onclick="${hasData ? `toggleATOGroup(${idx})` : ''}">
+    const headerRow = `<tr style="cursor:${hasData?'pointer':'default'};" onclick="${hasData?`toggleATOGroup(${idx})`:''}">
       <td style="font-size:13px;padding:10px 12px;">
         <div style="display:flex;align-items:center;">
           ${chevron}
           <div>
-            <span style="font-weight:${hasData ? '600' : '400'};color:${hasData ? 'var(--text)' : 'var(--text2)'};">${g.label}</span>
+            <span style="font-weight:${hasData?'600':'400'};color:${hasData?'var(--text)':'var(--text2)'};">${g.label}</span>
             ${hintNote}
           </div>
         </div>
       </td>
-      <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData ? 'var(--income-color)' : 'var(--text2)'};">${hasData ? fmt(amount) : '—'}</td>
-      <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData ? matching.length : '—'}</td>
+      <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:14px;white-space:nowrap;color:${hasData?'var(--income-color)':'var(--text2)'};">${hasData?fmt(claimable):'—'}</td>
+      <td style="text-align:right;padding:10px 12px;font-size:12px;color:var(--text2);">${hasData?matching.length:'—'}</td>
     </tr>`;
 
     let subRows = '';
     if (isExpanded && catGroups.length > 0) {
       subRows = catGroups.map(([cat, txns]) => {
-        const catTotal = txns.reduce((s,t) => s+t.amount, 0);
-        // Category subtotal row
+        const catRaw     = txns.reduce((s,t) => s+t.amount, 0);
+        const pct        = getCatBizPct(cat);
+        const catClaimed = catRaw * pct / 100;
+        const hasPct     = pct < 100;
+
+        // Category subtotal row with inline % business use editor
         const catHeader = `<tr style="background:var(--surface2);">
-          <td style="padding:6px 12px 6px 34px;font-size:12px;font-weight:700;color:var(--text);border-top:1px solid var(--border);">${esc(cat)}</td>
-          <td style="text-align:right;padding:6px 12px;font-size:12px;font-weight:700;color:var(--income-color);border-top:1px solid var(--border);">${fmt(catTotal)}</td>
-          <td style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text2);border-top:1px solid var(--border);">${txns.length}</td>
+          <td style="padding:7px 12px 7px 34px;font-size:12px;border-top:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <strong>${esc(cat)}</strong>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);" onclick="event.stopPropagation()">
+                Business use:
+                <input type="number" min="1" max="100" value="${pct}"
+                  style="width:48px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:11px;text-align:center;"
+                  onchange="setCatBizPct('${escAttr(cat)}',this.value)" onclick="event.stopPropagation()">%
+              </label>
+              ${hasPct ? `<span style="font-size:11px;color:var(--text2);">full: ${fmt(catRaw)}</span>` : ''}
+            </div>
+          </td>
+          <td style="text-align:right;padding:7px 12px;font-size:12px;font-weight:700;color:var(--income-color);border-top:1px solid var(--border);white-space:nowrap;">${fmt(catClaimed)}</td>
+          <td style="text-align:right;padding:7px 12px;font-size:11px;color:var(--text2);border-top:1px solid var(--border);">${txns.length}</td>
         </tr>`;
-        // Individual transaction rows under this category
-        const txnRows = txns
-          .slice().sort((a,b) => a.date.localeCompare(b.date))
-          .map(t => `<tr style="background:var(--surface2);">
-            <td style="padding:4px 12px 4px 52px;font-size:12px;border-top:1px solid var(--border);">
-              <span style="color:var(--text);">${esc(t.description || '—')}</span>${t.company ? `<span style="color:var(--text2);"> · ${esc(t.company)}</span>` : ''}
-              <span style="color:var(--text2);margin-left:8px;font-size:11px;">${fmtDate(t.date)}</span>
+
+        // Individual transactions — with inline category & bp dropdowns for reassignment
+        const txnRows = txns.slice().sort((a,b) => a.date.localeCompare(b.date)).map(t => {
+          const catSel = sortedCats().map(c =>
+            `<option value="${escAttr(c)}"${c===t.category?' selected':''}>${esc(c)}</option>`).join('');
+          return `<tr style="background:var(--surface2);">
+            <td style="padding:5px 12px 5px 52px;font-size:12px;border-top:1px solid var(--border);">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="color:var(--text);">${esc(t.description||'—')}${t.company?`<span style="color:var(--text2);"> · ${esc(t.company)}</span>`:''}</span>
+                <span style="color:var(--text2);font-size:11px;">${fmtDate(t.date)}</span>
+                <select style="font-size:11px;padding:2px 5px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);"
+                  onclick="event.stopPropagation()" onchange="saveATOTxnField('${escAttr(t.id)}','category',this.value)">${catSel}</select>
+                <select style="font-size:11px;padding:2px 5px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);"
+                  onclick="event.stopPropagation()" onchange="saveATOTxnField('${escAttr(t.id)}','bp',this.value)">
+                  <option value="personal"${(t.bp||'personal')==='personal'?' selected':''}>Personal</option>
+                  <option value="business"${t.bp==='business'?' selected':''}>Business</option>
+                </select>
+              </div>
             </td>
-            <td style="text-align:right;padding:4px 12px;font-size:12px;color:var(--income-color);border-top:1px solid var(--border);">${fmt(t.amount)}</td>
+            <td style="text-align:right;padding:5px 12px;font-size:12px;color:var(--income-color);border-top:1px solid var(--border);white-space:nowrap;">${fmt(t.amount)}</td>
             <td style="border-top:1px solid var(--border);"></td>
-          </tr>`).join('');
+          </tr>`;
+        }).join('');
+
         return catHeader + txnRows;
       }).join('');
     }
@@ -3499,49 +3587,31 @@ function renderATOSummary() {
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
       <div>
         <div class="card-title" style="margin-bottom:2px;">ATO Tax Return — Deductions Breakdown</div>
-        <div style="font-size:12px;color:var(--text2);">Amounts to enter in your myTax / tax return for ${fmtFY(taxFY)} · Click a row to expand by category</div>
+        <div style="font-size:12px;color:var(--text2);">Click a row to expand · Reassign category or tag inline · Set % business use per category</div>
       </div>
-      <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">total deductions</span></div>
+      <div style="font-size:22px;font-weight:700;color:var(--income-color);">${fmt(totalDeductions)} <span style="font-size:12px;font-weight:400;color:var(--text2);">claimable deductions</span></div>
     </div>
     <div class="table-wrap">
       <table>
         <thead><tr>
           <th>ATO Field</th>
-          <th style="text-align:right;width:110px;">Amount</th>
-          <th style="text-align:right;width:60px;">Txns</th>
+          <th style="text-align:right;width:120px;">Claimable</th>
+          <th style="text-align:right;width:55px;">Txns</th>
         </tr></thead>
         <tbody>
           ${rows}
           <tr style="border-top:2px solid var(--border);">
-            <td style="font-weight:700;padding:10px 12px;">Total deductions</td>
+            <td style="font-weight:700;padding:10px 12px;">Total claimable deductions</td>
             <td style="text-align:right;padding:10px 12px;font-weight:700;font-size:15px;color:var(--income-color);">${fmt(totalDeductions)}</td>
             <td></td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.5;">
-      ⚠ Only expenses tagged as <strong>Business</strong> are counted (except Gifts &amp; Donations, which includes all transactions in that category).
-      Tag transactions in the table below, then this summary updates automatically.
+    <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text2);margin-top:12px;line-height:1.6;">
+      ⚠ <strong>Business-tagged expenses only</strong> (except Gifts &amp; Donations). Each transaction appears in exactly one ATO field.
+      Use the inline dropdowns to reassign category or business/personal tag. Set <em>Business use %</em> for mixed-use expenses like phone or internet.
     </div>`;
-}
-
-function toggleTaxBP(idx, newBP) {
-  if (idx < 0 || idx >= taxPageTxns.length) return;
-  taxPageTxns[idx].bp = newBP;
-
-  if (taxFY === CURRENT_FY) {
-    const t = taxPageTxns[idx];
-    const li = transactions.findIndex(x => x.id === t.id ||
-      (x.date === t.date && Math.abs(x.amount - t.amount) < 0.01 && x.description === t.description));
-    if (li >= 0) transactions[li].bp = newBP;
-    save('txns_' + CURRENT_FY, transactions);
-  } else {
-    save('txns_' + taxFY, taxPageTxns);
-  }
-
-  renderTaxKPIs();
-  renderTaxTransactions();
 }
 
 // ─── FY ROLLOVER ─────────────────────────────────────────────────────────────
@@ -3674,15 +3744,23 @@ function initTheme() {
 
 function backupData() {
   const payload = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
-    transactions, historicalData, budgets
+    transactions,
+    historicalData,
+    budgets,
+    savingsGoals:       load('savingsGoals', []),
+    customCategories:   load('customCategories', { income: [], expense: [] }),
+    customRules:        load('customRules', []),
+    categoryBizPercent: load('categoryBizPercent', {}),
+    theme:              load('theme', 'dark'),
+    customAccent:       load('customAccent', null),
   };
   const a = document.createElement('a');
   a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(payload, null, 2));
   a.download = `Florian_Budget_Backup_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
-  showToast('Backup saved. Keep this file safe.','success');
+  showToast('Full backup saved — includes goals, rules, and settings.', 'success');
 }
 
 function restoreData(e) {
@@ -3692,10 +3770,16 @@ function restoreData(e) {
   reader.onload = ev => {
     try {
       const data = JSON.parse(ev.target.result);
-      if (data.transactions) { transactions = data.transactions; save('txns_'+CURRENT_FY, transactions); }
-      if (data.historicalData) { historicalData = data.historicalData; save('history', historicalData); }
-      if (data.budgets) { budgets = data.budgets; save('budgets_'+CURRENT_FY, budgets); }
-      showToast('Backup restored successfully.','success');
+      if (data.transactions)      { transactions = data.transactions; save('txns_'+CURRENT_FY, transactions); }
+      if (data.historicalData)    { historicalData = data.historicalData; save('history', historicalData); }
+      if (data.budgets)           { budgets = data.budgets; save('budgets_'+CURRENT_FY, budgets); }
+      if (data.savingsGoals)      save('savingsGoals', data.savingsGoals);
+      if (data.customCategories)  save('customCategories', data.customCategories);
+      if (data.customRules)       save('customRules', data.customRules);
+      if (data.categoryBizPercent) save('categoryBizPercent', data.categoryBizPercent);
+      if (data.theme)             save('theme', data.theme);
+      if (data.customAccent)      save('customAccent', data.customAccent);
+      showToast('Backup restored successfully.', 'success');
       showPage('dashboard');
     } catch(err) {
       showToast('Could not read backup file: ' + err.message, 'error');
