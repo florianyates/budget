@@ -1972,19 +1972,19 @@ function renderBudgetProgress() {
 
 // Capital movement categories — excluded from "true expenses" in KPIs
 const CAPITAL_CATS = new Set(['Investments', 'Savings Transfer']);
-// Income categories treated as irregular reimbursements — shown in total income but excluded from
-// savings rate and projected-income calculations (so projections reflect only reliable recurring income).
-const REIMB_INCOME_CATS = new Set(['Miscellaneous']);
+// Only these income categories are used for savings rate and projections.
+// Everything else (transfers, reimbursements, one-offs) shows in raw totals but is not projected.
+const PREDICTABLE_INCOME_CATS = new Set(['Salary', 'Dividends']);
 
 function renderDashboard() {
   const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-  const reimbursements = transactions.filter(t=>t.type==='income'&&REIMB_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
-  const coreIncome = income - reimbursements; // Salary, Dividends, Interest — reliable recurring income
+  const predictableIncome = transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const otherIncome = income - predictableIncome;
   const allExpenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const capital = transactions.filter(t=>t.type==='expense'&&CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const expenses = allExpenses - capital; // true living expenses
-  const net = income - allExpenses; // actual money saved/invested (uses all income incl. reimbursements)
-  const rate = coreIncome > 0 ? (net/coreIncome*100) : 0; // rate vs recurring income only
+  const net = income - allExpenses; // actual money saved/invested (all cash)
+  const rate = predictableIncome > 0 ? (net/predictableIncome*100) : 0; // rate vs salary+dividends only
 
   document.getElementById('kpi-income').textContent = fmt(income);
   document.getElementById('kpi-expenses').textContent = fmt(expenses);
@@ -1994,16 +1994,17 @@ function renderDashboard() {
   document.getElementById('kpi-savings-sub').textContent = capital > 0 ? `Incl. ${fmt(capital)} invested` : 'Income minus all expenses';
   document.getElementById('kpi-rate').textContent = rate.toFixed(1) + '%';
   document.getElementById('kpi-rate').style.color = rate >= 20 ? 'var(--income-color)' : rate >= 10 ? 'var(--warning)' : 'var(--expense-color)';
-  // Show reimbursement caveat on savings rate card if relevant
   const rateSubEl = document.getElementById('kpi-rate-sub');
-  if (rateSubEl) rateSubEl.textContent = reimbursements > 0 ? `vs recurring income (excl. ${fmt(reimbursements)} reimbursements)` : 'of total income';
+  if (rateSubEl) rateSubEl.textContent = otherIncome > 0
+    ? `vs salary + dividends (excl. ${fmt(otherIncome)} other income)`
+    : 'of salary + dividends';
 
-  // Projections — based on core income only (no reimbursements — they're one-offs)
+  // Projections — salary+dividends only, simple annualisation for dashboard KPIs
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, (today - FY_START) / 86400000);
   const pctDone = Math.min(daysDone / fyDays, 1);
-  const projIncome = pctDone > 0 ? coreIncome / pctDone : 0;
+  const projIncome = pctDone > 0 ? predictableIncome / pctDone : 0;
   const projExpenses = pctDone > 0 ? expenses / pctDone : 0;
   const projSavings = projIncome - projExpenses;
   document.getElementById('proj-income').textContent = fmt(projIncome);
@@ -2025,19 +2026,23 @@ function renderDashboard() {
 function renderMonthlyChart() {
   destroyChart('monthly');
   const months = getMonths();
-  const incomeData = months.map(m => transactions.filter(t=>t.type==='income'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
-  const expenseData = months.map(m => transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const predictableData = months.map(m => transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const otherIncomeData  = months.map(m => transactions.filter(t=>t.type==='income'&&!PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const expenseData      = months.map(m => transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const hasOther = otherIncomeData.some(v => v > 0);
 
   charts['monthly'] = new Chart(document.getElementById('chart-monthly'), {
     type: 'bar',
     data: {
       labels: months.map(fmtMonth),
       datasets: [
-        { label: 'Income', data: incomeData, backgroundColor: cssRgba('--income-color',0.7), borderRadius: 4 },
+        { label: 'Salary & Dividends', data: predictableData, backgroundColor: cssRgba('--income-color',0.8), borderRadius: 4, stack: 'income' },
+        ...(hasOther ? [{ label: 'Other income', data: otherIncomeData, backgroundColor: cssRgba('--income-color',0.3), borderRadius: 0, stack: 'income' }] : []),
         { label: 'Expenses', data: expenseData, backgroundColor: cssRgba('--expense-color',0.7), borderRadius: 4 }
       ]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { boxWidth: 12 } } },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { boxWidth: 12 } } },
       scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => '$'+v.toLocaleString() } } } }
   });
 }
@@ -2102,6 +2107,31 @@ function renderRecentTransactions() {
 
 // ─── NEXT YEAR PREDICTIONS ───────────────────────────────────────────────────
 
+function detectDividendSchedule(txns) {
+  const divs = txns.filter(t => t.type === 'income' && t.category === 'Dividends')
+                   .sort((a, b) => a.date.localeCompare(b.date));
+  if (divs.length === 0) return null;
+
+  const totalSoFar = divs.reduce((s, t) => s + t.amount, 0);
+
+  if (divs.length === 1) {
+    // One payment seen — assume semi-annual (most common AU dividend cycle)
+    return { paymentsPerYear: 2, avgPayment: totalSoFar, intervalMonths: 6, lastDate: divs[0].date };
+  }
+
+  // Multiple payments — measure actual interval
+  const dates = divs.map(t => new Date(t.date + 'T00:00:00'));
+  const intervals = [];
+  for (let i = 1; i < dates.length; i++) {
+    intervals.push((dates[i].getFullYear() - dates[i-1].getFullYear()) * 12 +
+                   (dates[i].getMonth() - dates[i-1].getMonth()));
+  }
+  const avgInterval   = Math.max(1, Math.round(intervals.reduce((s,v)=>s+v,0) / intervals.length));
+  const paymentsPerYear = Math.round(12 / avgInterval);
+  const avgPayment    = totalSoFar / divs.length;
+  return { paymentsPerYear, avgPayment, intervalMonths: avgInterval, lastDate: divs[divs.length-1].date };
+}
+
 function renderNextYearPredictions() {
   if (transactions.length === 0) {
     ['pred-income','pred-expenses','pred-savings','pred-rate'].forEach(id => { document.getElementById(id).textContent = '—'; });
@@ -2125,14 +2155,26 @@ function renderNextYearPredictions() {
   const daysDone = Math.max(1, Math.min((today - FY_START) / 86400000, fyDays));
   const pctDone = daysDone / fyDays;
 
-  // Base monthly averages from 26/27 (annualised then ÷12)
-  // Exclude REIMB_INCOME_CATS (e.g. Miscellaneous) — reimbursements are one-offs, not recurring
-  const incomeBycat = {};
-  transactions.filter(t => t.type === 'income' && !REIMB_INCOME_CATS.has(t.category)).forEach(t => {
-    incomeBycat[t.category] = (incomeBycat[t.category] || 0) + t.amount;
-  });
-  Object.keys(incomeBycat).forEach(c => { incomeBycat[c] = incomeBycat[c] / pctDone / 12; });
+  // ── Salary: simple monthly average, scaled by pay rise
+  const salaryTotal   = transactions.filter(t => t.type === 'income' && t.category === 'Salary').reduce((s,t)=>s+t.amount,0);
+  const salaryMonthly = (salaryTotal / pctDone / 12) * (1 + payRisePct);
 
+  // ── Dividends: detect payment frequency, project as lump sums in correct months
+  const divSched = detectDividendSchedule(transactions);
+  const divLumpSums = new Map(); // YYYY-MM → amount
+  if (divSched) {
+    const intervalMonths = divSched.intervalMonths;
+    let nextPay = new Date(divSched.lastDate + 'T00:00:00');
+    nextPay.setMonth(nextPay.getMonth() + intervalMonths);
+    const fyEnd = new Date('2028-06-30');
+    while (nextPay <= fyEnd) {
+      const ym = `${nextPay.getFullYear()}-${String(nextPay.getMonth()+1).padStart(2,'0')}`;
+      if (ym >= '2027-07') divLumpSums.set(ym, (divLumpSums.get(ym)||0) + divSched.avgPayment);
+      nextPay.setMonth(nextPay.getMonth() + intervalMonths);
+    }
+  }
+
+  // ── Expenses: monthly averages per category
   const expBycat = {};
   transactions.filter(t => t.type === 'expense').forEach(t => {
     expBycat[t.category] = (expBycat[t.category] || 0) + t.amount;
@@ -2141,16 +2183,11 @@ function renderNextYearPredictions() {
 
   // Rent increase: fortnightly → monthly  ($250/fn × 26fn/yr ÷ 12mo)
   const rentIncreaseMonthly = rentIncreaseFn * 26 / 12;
-  const rentImpactMonths = nextMonths.filter(m => m >= rentFromMonth).length;
 
   // Project each month
-  const projIncome = nextMonths.map(() => {
-    let tot = 0;
-    Object.entries(incomeBycat).forEach(([cat, avg]) => {
-      tot += cat === 'Salary' ? avg * (1 + payRisePct) : avg;
-    });
-    return tot;
-  });
+  const projIncome = nextMonths.map(month =>
+    salaryMonthly + (divLumpSums.get(month) || 0)
+  );
 
   const projExpenses = nextMonths.map(month => {
     let tot = 0;
@@ -2168,8 +2205,9 @@ function renderNextYearPredictions() {
   const totalNet      = totalIncome - totalExpenses;
   const totalRate     = totalIncome > 0 ? (totalNet / totalIncome * 100) : 0;
 
-  // Current year annualised (for delta labels) — income already excludes reimbursements
-  const currIncome   = Object.values(incomeBycat).reduce((s, v) => s + v, 0) * 12;
+  // Current year annualised for delta labels — salary+dividends only
+  const currDivAnnual = divSched ? divSched.avgPayment * divSched.paymentsPerYear : 0;
+  const currIncome   = salaryTotal / pctDone + currDivAnnual;
   const currCapital  = ((expBycat['Investments']||0) + (expBycat['Savings Transfer']||0)) * 12;
   const currExpenses = Object.values(expBycat).reduce((s, v) => s + v, 0) * 12;
   const currLiving   = currExpenses - currCapital;
@@ -2221,21 +2259,31 @@ function renderNextYearPredictions() {
   });
 
   // Assumption breakdown
-  const salaryBase   = (incomeBycat['Salary'] || 0) * 12;
-  const salaryNew    = salaryBase * (1 + payRisePct);
-  const rentExtra    = rentIncreaseMonthly * rentImpactMonths;
-  const rentCurrent  = (expBycat['Rent & Housing'] || 0) * 12;
-  const otherIncome  = totalIncome - salaryNew;
+  const salaryBase      = salaryTotal / pctDone; // annualised current-year salary
+  const salaryNewAnnual = salaryBase * (1 + payRisePct);
+  const rentImpactMonths = nextMonths.filter(m => m >= rentFromMonth).length;
+  const rentExtra        = rentIncreaseMonthly * rentImpactMonths;
+  const divInfo = divSched
+    ? `${divSched.paymentsPerYear}× per year · ${fmt(divSched.avgPayment)} avg · ${divLumpSums.size} payment${divLumpSums.size !== 1 ? 's' : ''} projected`
+    : 'No dividend history';
 
   document.getElementById('pred-adjustments').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:12px;">
       <div style="padding:12px;background:rgba(0,212,170,0.07);border:1px solid rgba(0,212,170,0.2);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;color:var(--income-color);">▲ Salary increase</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
-          ${fmt(salaryBase)}/yr → ${fmt(salaryNew)}/yr<br>
-          <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNew - salaryBase)}</span> extra income
+          ${fmt(salaryBase)}/yr → ${fmt(salaryNewAnnual)}/yr<br>
+          <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNewAnnual - salaryBase)}</span> extra income
         </div>
       </div>
+      ${divSched ? `
+      <div style="padding:12px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.2);border-radius:8px;">
+        <div style="font-weight:700;margin-bottom:4px;color:var(--accent);">◆ Dividends</div>
+        <div style="color:var(--text2);font-size:12px;line-height:1.7;">
+          ${divInfo}<br>
+          Projected as lump sums — not spread monthly
+        </div>
+      </div>` : ''}
       <div style="padding:12px;background:rgba(255,107,107,0.07);border:1px solid rgba(255,107,107,0.2);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;color:var(--expense-color);">▼ Rent increase</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
@@ -2246,15 +2294,16 @@ function renderNextYearPredictions() {
       <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;">= Net impact of changes</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
-          Income lift: <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNew - salaryBase)}</span><br>
+          Income lift: <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNewAnnual - salaryBase)}</span><br>
           Rent drag: <span style="color:var(--expense-color);font-weight:600;">−${fmt(rentExtra)}</span><br>
-          <span style="font-weight:700;color:${(salaryNew - salaryBase - rentExtra) >= 0 ? 'var(--income-color)' : 'var(--expense-color)'};">
-            Net: ${(salaryNew - salaryBase - rentExtra) >= 0 ? '+' : '−'}${fmt(Math.abs(salaryNew - salaryBase - rentExtra))}
+          <span style="font-weight:700;color:${(salaryNewAnnual - salaryBase - rentExtra) >= 0 ? 'var(--income-color)' : 'var(--expense-color)'};">
+            Net: ${(salaryNewAnnual - salaryBase - rentExtra) >= 0 ? '+' : '−'}${fmt(Math.abs(salaryNewAnnual - salaryBase - rentExtra))}
           </span>
         </div>
       </div>
       <div style="font-size:11px;color:var(--text2);line-height:1.6;padding:0 4px;">
-        All other categories carry forward at FY 26/27 pace.<br>
+        Income projection: salary + dividends only. Other income (transfers etc.) excluded.<br>
+        All expense categories carry forward at FY 26/27 pace.<br>
         Based on <strong>${Math.round(pctDone * 100)}%</strong> of this year complete.
       </div>
     </div>`;
