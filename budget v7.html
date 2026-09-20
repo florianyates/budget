@@ -188,6 +188,12 @@
   .btn-use-prev { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); cursor: pointer; white-space: nowrap; }
   .btn-use-prev:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+  /* Chart category toggles */
+  .chart-toggles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .cat-chip { padding: 2px 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 11px; cursor: pointer; transition: opacity 0.15s, background 0.15s; white-space: nowrap; }
+  .cat-chip:hover { border-color: var(--accent); }
+  .cat-chip.off { opacity: 0.35; text-decoration: line-through; }
+
   /* Projection cards */
   .proj-card { text-align: center; }
   .proj-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
@@ -363,10 +369,12 @@
         <div class="card">
           <div class="card-title">Monthly Income vs Expenses</div>
           <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+          <div id="toggles-monthly" class="chart-toggles"></div>
         </div>
         <div class="card">
           <div class="card-title">Spending by Category</div>
           <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+          <div id="toggles-categories" class="chart-toggles"></div>
         </div>
       </div>
 
@@ -375,6 +383,7 @@
         <div class="card">
           <div class="card-title">Income Breakdown</div>
           <div class="chart-wrap"><canvas id="chart-income-breakdown"></canvas></div>
+          <div id="toggles-income" class="chart-toggles"></div>
         </div>
         <div class="card">
           <div class="card-title" style="margin-bottom:12px;">This Month's Budget</div>
@@ -1233,6 +1242,7 @@ function save(key, val) {
 let transactions = load('txns_' + CURRENT_FY, []);
 let historicalData = load('history', {});
 let budgets = load('budgets_' + CURRENT_FY, {});
+let chartHiddenCats = load('chartHiddenCats', {});
 let pendingImport = [];
 const pendingEditTracker = {}; // { idx: { desc, company, origCat, origType, newCat, newType } }
 let editingId = null;
@@ -1972,19 +1982,39 @@ function renderBudgetProgress() {
 
 // Capital movement categories — excluded from "true expenses" in KPIs
 const CAPITAL_CATS = new Set(['Investments', 'Savings Transfer']);
-// Income categories treated as irregular reimbursements — shown in total income but excluded from
-// savings rate and projected-income calculations (so projections reflect only reliable recurring income).
-const REIMB_INCOME_CATS = new Set(['Miscellaneous']);
+// Only these income categories are used for savings rate and projections.
+// Everything else (transfers, reimbursements, one-offs) shows in raw totals but is not projected.
+const PREDICTABLE_INCOME_CATS = new Set(['Salary', 'Dividends']);
+
+function toggleChartCat(chartKey, cat) {
+  if (!chartHiddenCats[chartKey]) chartHiddenCats[chartKey] = [];
+  const idx = chartHiddenCats[chartKey].indexOf(cat);
+  if (idx >= 0) chartHiddenCats[chartKey].splice(idx, 1);
+  else chartHiddenCats[chartKey].push(cat);
+  save('chartHiddenCats', chartHiddenCats);
+  if (chartKey === 'monthly')     renderMonthlyChart();
+  else if (chartKey === 'categories') renderCategoryChart();
+  else if (chartKey === 'income') renderIncomeBreakdown();
+}
+
+function renderCatToggles(containerId, chartKey, cats) {
+  const el = document.getElementById(containerId);
+  if (!el || cats.length === 0) return;
+  const hidden = new Set(chartHiddenCats[chartKey] || []);
+  el.innerHTML = cats.map(cat =>
+    `<button class="cat-chip${hidden.has(cat) ? ' off' : ''}" onclick="toggleChartCat('${chartKey}','${cat.replace(/'/g,'\\\'')}')"><span>${esc(cat)}</span></button>`
+  ).join('');
+}
 
 function renderDashboard() {
   const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-  const reimbursements = transactions.filter(t=>t.type==='income'&&REIMB_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
-  const coreIncome = income - reimbursements; // Salary, Dividends, Interest — reliable recurring income
+  const predictableIncome = transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const otherIncome = income - predictableIncome;
   const allExpenses = transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
   const capital = transactions.filter(t=>t.type==='expense'&&CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const expenses = allExpenses - capital; // true living expenses
-  const net = income - allExpenses; // actual money saved/invested (uses all income incl. reimbursements)
-  const rate = coreIncome > 0 ? (net/coreIncome*100) : 0; // rate vs recurring income only
+  const net = income - allExpenses; // actual money saved/invested (all cash)
+  const rate = predictableIncome > 0 ? (net/predictableIncome*100) : 0; // rate vs salary+dividends only
 
   document.getElementById('kpi-income').textContent = fmt(income);
   document.getElementById('kpi-expenses').textContent = fmt(expenses);
@@ -1994,16 +2024,17 @@ function renderDashboard() {
   document.getElementById('kpi-savings-sub').textContent = capital > 0 ? `Incl. ${fmt(capital)} invested` : 'Income minus all expenses';
   document.getElementById('kpi-rate').textContent = rate.toFixed(1) + '%';
   document.getElementById('kpi-rate').style.color = rate >= 20 ? 'var(--income-color)' : rate >= 10 ? 'var(--warning)' : 'var(--expense-color)';
-  // Show reimbursement caveat on savings rate card if relevant
   const rateSubEl = document.getElementById('kpi-rate-sub');
-  if (rateSubEl) rateSubEl.textContent = reimbursements > 0 ? `vs recurring income (excl. ${fmt(reimbursements)} reimbursements)` : 'of total income';
+  if (rateSubEl) rateSubEl.textContent = otherIncome > 0
+    ? `vs salary + dividends (excl. ${fmt(otherIncome)} other income)`
+    : 'of salary + dividends';
 
-  // Projections — based on core income only (no reimbursements — they're one-offs)
+  // Projections — salary+dividends only, simple annualisation for dashboard KPIs
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, (today - FY_START) / 86400000);
   const pctDone = Math.min(daysDone / fyDays, 1);
-  const projIncome = pctDone > 0 ? coreIncome / pctDone : 0;
+  const projIncome = pctDone > 0 ? predictableIncome / pctDone : 0;
   const projExpenses = pctDone > 0 ? expenses / pctDone : 0;
   const projSavings = projIncome - projExpenses;
   document.getElementById('proj-income').textContent = fmt(projIncome);
@@ -2025,28 +2056,40 @@ function renderDashboard() {
 function renderMonthlyChart() {
   destroyChart('monthly');
   const months = getMonths();
-  const incomeData = months.map(m => transactions.filter(t=>t.type==='income'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
-  const expenseData = months.map(m => transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const hiddenExp = new Set(chartHiddenCats['monthly'] || []);
+  const predictableData = months.map(m => transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const otherIncomeData  = months.map(m => transactions.filter(t=>t.type==='income'&&!PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  // Exclude CAPITAL_CATS (internal transfers/investments) and any user-hidden categories
+  const expenseData = months.map(m => transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&!hiddenExp.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  const hasOther = otherIncomeData.some(v => v > 0);
 
   charts['monthly'] = new Chart(document.getElementById('chart-monthly'), {
     type: 'bar',
     data: {
       labels: months.map(fmtMonth),
       datasets: [
-        { label: 'Income', data: incomeData, backgroundColor: cssRgba('--income-color',0.7), borderRadius: 4 },
+        { label: 'Salary & Dividends', data: predictableData, backgroundColor: cssRgba('--income-color',0.8), borderRadius: 4, stack: 'income' },
+        ...(hasOther ? [{ label: 'Other income', data: otherIncomeData, backgroundColor: cssRgba('--income-color',0.3), borderRadius: 0, stack: 'income' }] : []),
         { label: 'Expenses', data: expenseData, backgroundColor: cssRgba('--expense-color',0.7), borderRadius: 4 }
       ]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { boxWidth: 12 } } },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { boxWidth: 12 } } },
       scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => '$'+v.toLocaleString() } } } }
   });
+
+  // Render expense category toggles (excluding capital cats — they're always hidden)
+  const expCats = [...new Set(transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).map(t=>t.category))].sort();
+  renderCatToggles('toggles-monthly', 'monthly', expCats);
 }
 
 function renderCategoryChart() {
   destroyChart('categories');
-  const expenseTxns = transactions.filter(t=>t.type==='expense');
+  const hiddenCats = new Set(chartHiddenCats['categories'] || []);
   const catMap = {};
-  expenseTxns.forEach(t => catMap[t.category] = (catMap[t.category]||0) + t.amount);
+  transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&!hiddenCats.has(t.category))
+              .forEach(t => catMap[t.category] = (catMap[t.category]||0) + t.amount);
+  const allExpCats = [...new Set(transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).map(t=>t.category))].sort();
   const sorted = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const colors = ['#6c63ff','#00d4aa','#ff6b6b','#ffd93d','#4ecdc4','#ff9f43','#a29bfe','#fd79a8'];
 
@@ -2058,6 +2101,7 @@ function renderCategoryChart() {
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font:{size:11} } } } }
   });
+  renderCatToggles('toggles-categories', 'categories', allExpCats);
 }
 
 function renderDashboardBudgetProgress() {
@@ -2102,6 +2146,31 @@ function renderRecentTransactions() {
 
 // ─── NEXT YEAR PREDICTIONS ───────────────────────────────────────────────────
 
+function detectDividendSchedule(txns) {
+  const divs = txns.filter(t => t.type === 'income' && t.category === 'Dividends')
+                   .sort((a, b) => a.date.localeCompare(b.date));
+  if (divs.length === 0) return null;
+
+  const totalSoFar = divs.reduce((s, t) => s + t.amount, 0);
+
+  if (divs.length === 1) {
+    // One payment seen — assume semi-annual (most common AU dividend cycle)
+    return { paymentsPerYear: 2, avgPayment: totalSoFar, intervalMonths: 6, lastDate: divs[0].date };
+  }
+
+  // Multiple payments — measure actual interval
+  const dates = divs.map(t => new Date(t.date + 'T00:00:00'));
+  const intervals = [];
+  for (let i = 1; i < dates.length; i++) {
+    intervals.push((dates[i].getFullYear() - dates[i-1].getFullYear()) * 12 +
+                   (dates[i].getMonth() - dates[i-1].getMonth()));
+  }
+  const avgInterval   = Math.max(1, Math.round(intervals.reduce((s,v)=>s+v,0) / intervals.length));
+  const paymentsPerYear = Math.round(12 / avgInterval);
+  const avgPayment    = totalSoFar / divs.length;
+  return { paymentsPerYear, avgPayment, intervalMonths: avgInterval, lastDate: divs[divs.length-1].date };
+}
+
 function renderNextYearPredictions() {
   if (transactions.length === 0) {
     ['pred-income','pred-expenses','pred-savings','pred-rate'].forEach(id => { document.getElementById(id).textContent = '—'; });
@@ -2125,39 +2194,66 @@ function renderNextYearPredictions() {
   const daysDone = Math.max(1, Math.min((today - FY_START) / 86400000, fyDays));
   const pctDone = daysDone / fyDays;
 
-  // Base monthly averages from 26/27 (annualised then ÷12)
-  // Exclude REIMB_INCOME_CATS (e.g. Miscellaneous) — reimbursements are one-offs, not recurring
-  const incomeBycat = {};
-  transactions.filter(t => t.type === 'income' && !REIMB_INCOME_CATS.has(t.category)).forEach(t => {
-    incomeBycat[t.category] = (incomeBycat[t.category] || 0) + t.amount;
-  });
-  Object.keys(incomeBycat).forEach(c => { incomeBycat[c] = incomeBycat[c] / pctDone / 12; });
+  // ── Salary: simple monthly average, scaled by pay rise
+  const salaryTotal   = transactions.filter(t => t.type === 'income' && t.category === 'Salary').reduce((s,t)=>s+t.amount,0);
+  const salaryMonthly = (salaryTotal / pctDone / 12) * (1 + payRisePct);
 
+  // ── Dividends: detect payment frequency, project as lump sums in correct months
+  const divSched = detectDividendSchedule(transactions);
+  const divLumpSums = new Map(); // YYYY-MM → amount
+  if (divSched) {
+    const intervalMonths = divSched.intervalMonths;
+    let nextPay = new Date(divSched.lastDate + 'T00:00:00');
+    nextPay.setMonth(nextPay.getMonth() + intervalMonths);
+    const fyEnd = new Date('2028-06-30');
+    while (nextPay <= fyEnd) {
+      const ym = `${nextPay.getFullYear()}-${String(nextPay.getMonth()+1).padStart(2,'0')}`;
+      if (ym >= '2027-07') divLumpSums.set(ym, (divLumpSums.get(ym)||0) + divSched.avgPayment);
+      nextPay.setMonth(nextPay.getMonth() + intervalMonths);
+    }
+  }
+
+  // ── Expenses: monthly averages per category (excluding capital/transfer cats)
   const expBycat = {};
-  transactions.filter(t => t.type === 'expense').forEach(t => {
+  transactions.filter(t => t.type === 'expense' && !CAPITAL_CATS.has(t.category)).forEach(t => {
     expBycat[t.category] = (expBycat[t.category] || 0) + t.amount;
   });
   Object.keys(expBycat).forEach(c => { expBycat[c] = expBycat[c] / pctDone / 12; });
 
   // Rent increase: fortnightly → monthly  ($250/fn × 26fn/yr ÷ 12mo)
   const rentIncreaseMonthly = rentIncreaseFn * 26 / 12;
-  const rentImpactMonths = nextMonths.filter(m => m >= rentFromMonth).length;
 
-  // Project each month
-  const projIncome = nextMonths.map(() => {
-    let tot = 0;
-    Object.entries(incomeBycat).forEach(([cat, avg]) => {
-      tot += cat === 'Salary' ? avg * (1 + payRisePct) : avg;
-    });
-    return tot;
+  // ── Seasonal weights: use this year's actual monthly distribution so the
+  //    forecast chart shows seasonal highs/lows rather than a flat line.
+  //    For calendar months that haven't happened yet, fall back to weight=1.
+  const curFYMonths = getMonths(); // all 12 months of current FY
+  const monthlyLivingExp = {}; // YYYY-MM -> actual living expenses
+  curFYMonths.forEach(m => {
+    monthlyLivingExp[m] = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&t.date.startsWith(m))
+                                       .reduce((s,t)=>s+t.amount,0);
+  });
+  const monthsWithData = curFYMonths.filter(m => monthlyLivingExp[m] > 0);
+  const avgMonthlyExp = monthsWithData.length > 0
+    ? monthsWithData.reduce((s,m)=>s+monthlyLivingExp[m],0) / monthsWithData.length : 1;
+  // seasonalWeight[calMon] e.g. '07' -> 1.2 means July is 1.2× average
+  const seasonalWeight = {};
+  curFYMonths.forEach(m => {
+    const cal = m.slice(5);
+    seasonalWeight[cal] = monthlyLivingExp[m] > 0 ? monthlyLivingExp[m] / avgMonthlyExp : 1;
   });
 
+  // Project each month
+  const projIncome = nextMonths.map(month =>
+    salaryMonthly + (divLumpSums.get(month) || 0)
+  );
+
+  const baseMonthlyExp = Object.values(expBycat).reduce((s,v)=>s+v,0);
   const projExpenses = nextMonths.map(month => {
-    let tot = 0;
-    Object.entries(expBycat).forEach(([cat, avg]) => {
-      tot += avg;
-      if (cat === 'Rent & Housing' && month >= rentFromMonth) tot += rentIncreaseMonthly;
-    });
+    const cal = month.slice(5); // calendar month '07'–'12','01'–'06'
+    const weight = seasonalWeight[cal] || 1;
+    let tot = baseMonthlyExp * weight;
+    // Rent increase is additive (not scaled by seasonal weight — it's a fixed change)
+    if (expBycat['Rent & Housing'] && month >= rentFromMonth) tot += rentIncreaseMonthly;
     return tot;
   });
 
@@ -2168,8 +2264,9 @@ function renderNextYearPredictions() {
   const totalNet      = totalIncome - totalExpenses;
   const totalRate     = totalIncome > 0 ? (totalNet / totalIncome * 100) : 0;
 
-  // Current year annualised (for delta labels) — income already excludes reimbursements
-  const currIncome   = Object.values(incomeBycat).reduce((s, v) => s + v, 0) * 12;
+  // Current year annualised for delta labels — salary+dividends only
+  const currDivAnnual = divSched ? divSched.avgPayment * divSched.paymentsPerYear : 0;
+  const currIncome   = salaryTotal / pctDone + currDivAnnual;
   const currCapital  = ((expBycat['Investments']||0) + (expBycat['Savings Transfer']||0)) * 12;
   const currExpenses = Object.values(expBycat).reduce((s, v) => s + v, 0) * 12;
   const currLiving   = currExpenses - currCapital;
@@ -2221,21 +2318,31 @@ function renderNextYearPredictions() {
   });
 
   // Assumption breakdown
-  const salaryBase   = (incomeBycat['Salary'] || 0) * 12;
-  const salaryNew    = salaryBase * (1 + payRisePct);
-  const rentExtra    = rentIncreaseMonthly * rentImpactMonths;
-  const rentCurrent  = (expBycat['Rent & Housing'] || 0) * 12;
-  const otherIncome  = totalIncome - salaryNew;
+  const salaryBase      = salaryTotal / pctDone; // annualised current-year salary
+  const salaryNewAnnual = salaryBase * (1 + payRisePct);
+  const rentImpactMonths = nextMonths.filter(m => m >= rentFromMonth).length;
+  const rentExtra        = rentIncreaseMonthly * rentImpactMonths;
+  const divInfo = divSched
+    ? `${divSched.paymentsPerYear}× per year · ${fmt(divSched.avgPayment)} avg · ${divLumpSums.size} payment${divLumpSums.size !== 1 ? 's' : ''} projected`
+    : 'No dividend history';
 
   document.getElementById('pred-adjustments').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:12px;">
       <div style="padding:12px;background:rgba(0,212,170,0.07);border:1px solid rgba(0,212,170,0.2);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;color:var(--income-color);">▲ Salary increase</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
-          ${fmt(salaryBase)}/yr → ${fmt(salaryNew)}/yr<br>
-          <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNew - salaryBase)}</span> extra income
+          ${fmt(salaryBase)}/yr → ${fmt(salaryNewAnnual)}/yr<br>
+          <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNewAnnual - salaryBase)}</span> extra income
         </div>
       </div>
+      ${divSched ? `
+      <div style="padding:12px;background:rgba(108,99,255,0.07);border:1px solid rgba(108,99,255,0.2);border-radius:8px;">
+        <div style="font-weight:700;margin-bottom:4px;color:var(--accent);">◆ Dividends</div>
+        <div style="color:var(--text2);font-size:12px;line-height:1.7;">
+          ${divInfo}<br>
+          Projected as lump sums — not spread monthly
+        </div>
+      </div>` : ''}
       <div style="padding:12px;background:rgba(255,107,107,0.07);border:1px solid rgba(255,107,107,0.2);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;color:var(--expense-color);">▼ Rent increase</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
@@ -2246,15 +2353,16 @@ function renderNextYearPredictions() {
       <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
         <div style="font-weight:700;margin-bottom:4px;">= Net impact of changes</div>
         <div style="color:var(--text2);font-size:12px;line-height:1.7;">
-          Income lift: <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNew - salaryBase)}</span><br>
+          Income lift: <span style="color:var(--income-color);font-weight:600;">+${fmt(salaryNewAnnual - salaryBase)}</span><br>
           Rent drag: <span style="color:var(--expense-color);font-weight:600;">−${fmt(rentExtra)}</span><br>
-          <span style="font-weight:700;color:${(salaryNew - salaryBase - rentExtra) >= 0 ? 'var(--income-color)' : 'var(--expense-color)'};">
-            Net: ${(salaryNew - salaryBase - rentExtra) >= 0 ? '+' : '−'}${fmt(Math.abs(salaryNew - salaryBase - rentExtra))}
+          <span style="font-weight:700;color:${(salaryNewAnnual - salaryBase - rentExtra) >= 0 ? 'var(--income-color)' : 'var(--expense-color)'};">
+            Net: ${(salaryNewAnnual - salaryBase - rentExtra) >= 0 ? '+' : '−'}${fmt(Math.abs(salaryNewAnnual - salaryBase - rentExtra))}
           </span>
         </div>
       </div>
       <div style="font-size:11px;color:var(--text2);line-height:1.6;padding:0 4px;">
-        All other categories carry forward at FY 26/27 pace.<br>
+        Income projection: salary + dividends only. Other income (transfers etc.) excluded.<br>
+        All expense categories carry forward at FY 26/27 pace.<br>
         Based on <strong>${Math.round(pctDone * 100)}%</strong> of this year complete.
       </div>
     </div>`;
@@ -3011,16 +3119,19 @@ function renderSavingsTrajectory() {
   const months = getMonths();
   let cum = 0;
   const actualData = months.map(m => {
+    // Include all income but exclude capital/transfer categories from expenses
+    // so the line shows money accumulating from daily life, not distorted by account transfers
     const inc = transactions.filter(t=>t.type==='income'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
-    const exp = transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const exp = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
     cum += inc - exp;
     return parseFloat(cum.toFixed(2));
   });
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, (today - FY_START) / 86400000);
-  const totalNet = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)
-                 - transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const totalInc = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const totalExp = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const totalNet = totalInc - totalExp;
   const dailyRate = totalNet / daysDone;
   const projData = months.map((m, i) => {
     const monthStart = new Date(m + '-01');
@@ -3105,8 +3216,10 @@ function renderMoMChart() {
 // ─── INCOME BREAKDOWN CHART ───────────────────────────────────────────────────
 
 function renderIncomeBreakdown() {
+  const hiddenInc = new Set(chartHiddenCats['income'] || []);
+  const allIncCats = [...new Set(transactions.filter(t=>t.type==='income').map(t=>t.category))].sort();
   const totals = {};
-  transactions.filter(t => t.type === 'income').forEach(t => {
+  transactions.filter(t => t.type === 'income' && !hiddenInc.has(t.category)).forEach(t => {
     totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
   const labels = Object.keys(totals);
@@ -3114,7 +3227,7 @@ function renderIncomeBreakdown() {
   const colors = ['#00d4aa','#6c63ff','#ffd93d','#ff6b6b','#4361ee','#10b981','#f43f5e'];
 
   destroyChart('income-breakdown');
-  if (labels.length === 0) return;
+  if (labels.length === 0) { renderCatToggles('toggles-income', 'income', allIncCats); return; }
   charts['income-breakdown'] = new Chart(document.getElementById('chart-income-breakdown'), {
     type: 'doughnut',
     data: { labels, datasets: [{ data, backgroundColor: colors.slice(0, labels.length), borderWidth: 2, borderColor: 'var(--surface)' }] },
@@ -3126,6 +3239,7 @@ function renderIncomeBreakdown() {
       }
     }
   });
+  renderCatToggles('toggles-income', 'income', allIncCats);
 }
 
 // ─── THIS MONTH BUDGET ───────────────────────────────────────────────────────

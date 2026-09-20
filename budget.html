@@ -188,6 +188,12 @@
   .btn-use-prev { font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); cursor: pointer; white-space: nowrap; }
   .btn-use-prev:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+  /* Chart category toggles */
+  .chart-toggles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .cat-chip { padding: 2px 9px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 11px; cursor: pointer; transition: opacity 0.15s, background 0.15s; white-space: nowrap; }
+  .cat-chip:hover { border-color: var(--accent); }
+  .cat-chip.off { opacity: 0.35; text-decoration: line-through; }
+
   /* Projection cards */
   .proj-card { text-align: center; }
   .proj-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
@@ -363,10 +369,12 @@
         <div class="card">
           <div class="card-title">Monthly Income vs Expenses</div>
           <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+          <div id="toggles-monthly" class="chart-toggles"></div>
         </div>
         <div class="card">
           <div class="card-title">Spending by Category</div>
           <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+          <div id="toggles-categories" class="chart-toggles"></div>
         </div>
       </div>
 
@@ -375,6 +383,7 @@
         <div class="card">
           <div class="card-title">Income Breakdown</div>
           <div class="chart-wrap"><canvas id="chart-income-breakdown"></canvas></div>
+          <div id="toggles-income" class="chart-toggles"></div>
         </div>
         <div class="card">
           <div class="card-title" style="margin-bottom:12px;">This Month's Budget</div>
@@ -1233,6 +1242,7 @@ function save(key, val) {
 let transactions = load('txns_' + CURRENT_FY, []);
 let historicalData = load('history', {});
 let budgets = load('budgets_' + CURRENT_FY, {});
+let chartHiddenCats = load('chartHiddenCats', {});
 let pendingImport = [];
 const pendingEditTracker = {}; // { idx: { desc, company, origCat, origType, newCat, newType } }
 let editingId = null;
@@ -1976,6 +1986,26 @@ const CAPITAL_CATS = new Set(['Investments', 'Savings Transfer']);
 // Everything else (transfers, reimbursements, one-offs) shows in raw totals but is not projected.
 const PREDICTABLE_INCOME_CATS = new Set(['Salary', 'Dividends']);
 
+function toggleChartCat(chartKey, cat) {
+  if (!chartHiddenCats[chartKey]) chartHiddenCats[chartKey] = [];
+  const idx = chartHiddenCats[chartKey].indexOf(cat);
+  if (idx >= 0) chartHiddenCats[chartKey].splice(idx, 1);
+  else chartHiddenCats[chartKey].push(cat);
+  save('chartHiddenCats', chartHiddenCats);
+  if (chartKey === 'monthly')     renderMonthlyChart();
+  else if (chartKey === 'categories') renderCategoryChart();
+  else if (chartKey === 'income') renderIncomeBreakdown();
+}
+
+function renderCatToggles(containerId, chartKey, cats) {
+  const el = document.getElementById(containerId);
+  if (!el || cats.length === 0) return;
+  const hidden = new Set(chartHiddenCats[chartKey] || []);
+  el.innerHTML = cats.map(cat =>
+    `<button class="cat-chip${hidden.has(cat) ? ' off' : ''}" onclick="toggleChartCat('${chartKey}','${cat.replace(/'/g,'\\\'')}')"><span>${esc(cat)}</span></button>`
+  ).join('');
+}
+
 function renderDashboard() {
   const income = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
   const predictableIncome = transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
@@ -2026,9 +2056,11 @@ function renderDashboard() {
 function renderMonthlyChart() {
   destroyChart('monthly');
   const months = getMonths();
+  const hiddenExp = new Set(chartHiddenCats['monthly'] || []);
   const predictableData = months.map(m => transactions.filter(t=>t.type==='income'&&PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
   const otherIncomeData  = months.map(m => transactions.filter(t=>t.type==='income'&&!PREDICTABLE_INCOME_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
-  const expenseData      = months.map(m => transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+  // Exclude CAPITAL_CATS (internal transfers/investments) and any user-hidden categories
+  const expenseData = months.map(m => transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&!hiddenExp.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
   const hasOther = otherIncomeData.some(v => v > 0);
 
   charts['monthly'] = new Chart(document.getElementById('chart-monthly'), {
@@ -2045,13 +2077,19 @@ function renderMonthlyChart() {
       plugins: { legend: { labels: { boxWidth: 12 } } },
       scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => '$'+v.toLocaleString() } } } }
   });
+
+  // Render expense category toggles (excluding capital cats — they're always hidden)
+  const expCats = [...new Set(transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).map(t=>t.category))].sort();
+  renderCatToggles('toggles-monthly', 'monthly', expCats);
 }
 
 function renderCategoryChart() {
   destroyChart('categories');
-  const expenseTxns = transactions.filter(t=>t.type==='expense');
+  const hiddenCats = new Set(chartHiddenCats['categories'] || []);
   const catMap = {};
-  expenseTxns.forEach(t => catMap[t.category] = (catMap[t.category]||0) + t.amount);
+  transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&!hiddenCats.has(t.category))
+              .forEach(t => catMap[t.category] = (catMap[t.category]||0) + t.amount);
+  const allExpCats = [...new Set(transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).map(t=>t.category))].sort();
   const sorted = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const colors = ['#6c63ff','#00d4aa','#ff6b6b','#ffd93d','#4ecdc4','#ff9f43','#a29bfe','#fd79a8'];
 
@@ -2063,6 +2101,7 @@ function renderCategoryChart() {
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font:{size:11} } } } }
   });
+  renderCatToggles('toggles-categories', 'categories', allExpCats);
 }
 
 function renderDashboardBudgetProgress() {
@@ -2174,9 +2213,9 @@ function renderNextYearPredictions() {
     }
   }
 
-  // ── Expenses: monthly averages per category
+  // ── Expenses: monthly averages per category (excluding capital/transfer cats)
   const expBycat = {};
-  transactions.filter(t => t.type === 'expense').forEach(t => {
+  transactions.filter(t => t.type === 'expense' && !CAPITAL_CATS.has(t.category)).forEach(t => {
     expBycat[t.category] = (expBycat[t.category] || 0) + t.amount;
   });
   Object.keys(expBycat).forEach(c => { expBycat[c] = expBycat[c] / pctDone / 12; });
@@ -2184,17 +2223,37 @@ function renderNextYearPredictions() {
   // Rent increase: fortnightly → monthly  ($250/fn × 26fn/yr ÷ 12mo)
   const rentIncreaseMonthly = rentIncreaseFn * 26 / 12;
 
+  // ── Seasonal weights: use this year's actual monthly distribution so the
+  //    forecast chart shows seasonal highs/lows rather than a flat line.
+  //    For calendar months that haven't happened yet, fall back to weight=1.
+  const curFYMonths = getMonths(); // all 12 months of current FY
+  const monthlyLivingExp = {}; // YYYY-MM -> actual living expenses
+  curFYMonths.forEach(m => {
+    monthlyLivingExp[m] = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&t.date.startsWith(m))
+                                       .reduce((s,t)=>s+t.amount,0);
+  });
+  const monthsWithData = curFYMonths.filter(m => monthlyLivingExp[m] > 0);
+  const avgMonthlyExp = monthsWithData.length > 0
+    ? monthsWithData.reduce((s,m)=>s+monthlyLivingExp[m],0) / monthsWithData.length : 1;
+  // seasonalWeight[calMon] e.g. '07' -> 1.2 means July is 1.2× average
+  const seasonalWeight = {};
+  curFYMonths.forEach(m => {
+    const cal = m.slice(5);
+    seasonalWeight[cal] = monthlyLivingExp[m] > 0 ? monthlyLivingExp[m] / avgMonthlyExp : 1;
+  });
+
   // Project each month
   const projIncome = nextMonths.map(month =>
     salaryMonthly + (divLumpSums.get(month) || 0)
   );
 
+  const baseMonthlyExp = Object.values(expBycat).reduce((s,v)=>s+v,0);
   const projExpenses = nextMonths.map(month => {
-    let tot = 0;
-    Object.entries(expBycat).forEach(([cat, avg]) => {
-      tot += avg;
-      if (cat === 'Rent & Housing' && month >= rentFromMonth) tot += rentIncreaseMonthly;
-    });
+    const cal = month.slice(5); // calendar month '07'–'12','01'–'06'
+    const weight = seasonalWeight[cal] || 1;
+    let tot = baseMonthlyExp * weight;
+    // Rent increase is additive (not scaled by seasonal weight — it's a fixed change)
+    if (expBycat['Rent & Housing'] && month >= rentFromMonth) tot += rentIncreaseMonthly;
     return tot;
   });
 
@@ -3060,16 +3119,19 @@ function renderSavingsTrajectory() {
   const months = getMonths();
   let cum = 0;
   const actualData = months.map(m => {
+    // Include all income but exclude capital/transfer categories from expenses
+    // so the line shows money accumulating from daily life, not distorted by account transfers
     const inc = transactions.filter(t=>t.type==='income'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
-    const exp = transactions.filter(t=>t.type==='expense'&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const exp = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
     cum += inc - exp;
     return parseFloat(cum.toFixed(2));
   });
   const today = new Date();
   const fyDays = (FY_END - FY_START) / 86400000;
   const daysDone = Math.max(1, (today - FY_START) / 86400000);
-  const totalNet = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)
-                 - transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const totalInc = transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const totalExp = transactions.filter(t=>t.type==='expense'&&!CAPITAL_CATS.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const totalNet = totalInc - totalExp;
   const dailyRate = totalNet / daysDone;
   const projData = months.map((m, i) => {
     const monthStart = new Date(m + '-01');
@@ -3154,8 +3216,10 @@ function renderMoMChart() {
 // ─── INCOME BREAKDOWN CHART ───────────────────────────────────────────────────
 
 function renderIncomeBreakdown() {
+  const hiddenInc = new Set(chartHiddenCats['income'] || []);
+  const allIncCats = [...new Set(transactions.filter(t=>t.type==='income').map(t=>t.category))].sort();
   const totals = {};
-  transactions.filter(t => t.type === 'income').forEach(t => {
+  transactions.filter(t => t.type === 'income' && !hiddenInc.has(t.category)).forEach(t => {
     totals[t.category] = (totals[t.category] || 0) + t.amount;
   });
   const labels = Object.keys(totals);
@@ -3163,7 +3227,7 @@ function renderIncomeBreakdown() {
   const colors = ['#00d4aa','#6c63ff','#ffd93d','#ff6b6b','#4361ee','#10b981','#f43f5e'];
 
   destroyChart('income-breakdown');
-  if (labels.length === 0) return;
+  if (labels.length === 0) { renderCatToggles('toggles-income', 'income', allIncCats); return; }
   charts['income-breakdown'] = new Chart(document.getElementById('chart-income-breakdown'), {
     type: 'doughnut',
     data: { labels, datasets: [{ data, backgroundColor: colors.slice(0, labels.length), borderWidth: 2, borderColor: 'var(--surface)' }] },
@@ -3175,6 +3239,7 @@ function renderIncomeBreakdown() {
       }
     }
   });
+  renderCatToggles('toggles-income', 'income', allIncCats);
 }
 
 // ─── THIS MONTH BUDGET ───────────────────────────────────────────────────────
